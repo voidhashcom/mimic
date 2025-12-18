@@ -1,0 +1,29 @@
+{
+  "name": "mimic-mono",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.6",
+    "@types/bun": "latest",
+    "ultracite": "^5.6.4"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "workspaces": {
+    "packages": [
+      "examples/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "effect": "^3.18.4"
+    }
+  }
+}
