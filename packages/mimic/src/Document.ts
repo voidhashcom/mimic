@@ -48,6 +48,14 @@ export interface Document<TSchema extends Primitive.AnyPrimitive> {
   get(): Primitive.InferState<TSchema> | undefined;
   
   /**
+   * Returns a readonly snapshot of the entire document state for rendering.
+   * The snapshot is a type-safe, readonly structure where:
+   * - Required fields and fields with defaults are guaranteed to be defined
+   * - Optional fields may be undefined
+   */
+  toSnapshot(): Primitive.InferSnapshot<TSchema>;
+  
+  /**
    * Runs a function within a transaction.
    * All operations are collected and applied atomically.
    * If the function throws, all changes are rolled back.
@@ -195,6 +203,10 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     
     get: (): Primitive.InferState<TSchema> | undefined => {
       return _state;
+    },
+    
+    toSnapshot: (): Primitive.InferSnapshot<TSchema> => {
+      return (rootProxy as { toSnapshot(): Primitive.InferSnapshot<TSchema> }).toSnapshot();
     },
     
     transaction: <R,>(fn: (root: Primitive.InferProxy<TSchema>) => R): R => {

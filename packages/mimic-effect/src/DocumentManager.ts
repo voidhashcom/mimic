@@ -5,7 +5,6 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
-import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as HashMap from "effect/HashMap";
 import * as Context from "effect/Context";
@@ -15,8 +14,9 @@ import type { Primitive, Transaction } from "@voidhash/mimic";
 import { ServerDocument } from "@voidhash/mimic/server";
 
 import * as Protocol from "./DocumentProtocol.js";
-import { MimicServerConfigTag, type MimicServerConfig } from "./MimicConfig.js";
-import { DocumentTypeNotFoundError } from "./errors.js";
+import { MimicServerConfigTag } from "./MimicConfig.js";
+import { MimicDataStorageTag } from "./MimicDataStorage.js";
+import { DocumentNotFoundError } from "./errors.js";
 
 // =============================================================================
 // Document Instance
@@ -48,14 +48,14 @@ export interface DocumentManager {
   readonly submit: (
     documentId: string,
     transaction: Transaction.Transaction
-  ) => Effect.Effect<Protocol.SubmitResult, DocumentTypeNotFoundError>;
+  ) => Effect.Effect<Protocol.SubmitResult>;
 
   /**
    * Get a snapshot of a document.
    */
   readonly getSnapshot: (
     documentId: string
-  ) => Effect.Effect<Protocol.SnapshotMessage, DocumentTypeNotFoundError>;
+  ) => Effect.Effect<Protocol.SnapshotMessage>;
 
   /**
    * Subscribe to broadcasts for a document.
@@ -65,7 +65,7 @@ export interface DocumentManager {
     documentId: string
   ) => Effect.Effect<
     Stream.Stream<Protocol.ServerBroadcast>,
-    DocumentTypeNotFoundError,
+    never,
     Scope.Scope
   >;
 }
@@ -82,28 +82,11 @@ export class DocumentManagerTag extends Context.Tag(
 // =============================================================================
 
 /**
- * Parse document ID to extract type and actual ID.
- * Format: "type:id" or just "id" (uses default type)
- */
-const parseDocumentId = (
-  documentId: string,
-  defaultType: string
-): { type: string; id: string } => {
-  const colonIndex = documentId.indexOf(":");
-  if (colonIndex === -1) {
-    return { type: defaultType, id: documentId };
-  }
-  return {
-    type: documentId.substring(0, colonIndex),
-    id: documentId.substring(colonIndex + 1),
-  };
-};
-
-/**
  * Create the DocumentManager service.
  */
 const makeDocumentManager = Effect.gen(function* () {
   const config = yield* MimicServerConfigTag;
+  const storage = yield* MimicDataStorageTag;
   
   // Map of document ID to document instance
   const documents = yield* Ref.make(
@@ -113,7 +96,7 @@ const makeDocumentManager = Effect.gen(function* () {
   // Get or create a document instance
   const getOrCreateDocument = (
     documentId: string
-  ): Effect.Effect<DocumentInstance, DocumentTypeNotFoundError> =>
+  ): Effect.Effect<DocumentInstance> =>
     Effect.gen(function* () {
       const current = yield* Ref.get(documents);
       const existing = HashMap.get(current, documentId);
@@ -124,24 +107,43 @@ const makeDocumentManager = Effect.gen(function* () {
         return existing.value;
       }
 
-      // Parse document ID to get type
-      const parsed = parseDocumentId(documentId, "default");
-      const schema = config.schemaRegistry.get(parsed.type);
+      // Load initial state from storage
+      const rawState = yield* Effect.catchAll(
+        storage.load(documentId),
+        () => Effect.succeed(undefined)
+      );
 
-      if (!schema) {
-        return yield* Effect.fail(
-          new DocumentTypeNotFoundError({ documentType: parsed.type })
-        );
-      }
+      // Transform loaded state with onLoad hook
+      const initialState = rawState !== undefined
+        ? yield* storage.onLoad(rawState)
+        : undefined;
 
       // Create PubSub for broadcasting
       const pubsub = yield* PubSub.unbounded<Protocol.ServerBroadcast>();
 
       // Create ServerDocument with broadcast callback
       const serverDocument = ServerDocument.make({
-        schema,
+        schema: config.schema,
+        initialState: initialState as Primitive.InferState<typeof config.schema> | undefined,
         maxTransactionHistory: config.maxTransactionHistory,
         onBroadcast: (transactionMessage) => {
+          // Get current state and save to storage
+          const currentState = serverDocument.get();
+          
+          // Run save in background (fire-and-forget with error logging)
+          Effect.runFork(
+            Effect.gen(function* () {
+              if (currentState !== undefined) {
+                const transformedState = yield* storage.onSave(currentState);
+                yield* Effect.catchAll(
+                  storage.save(documentId, transformedState),
+                  (error) => Effect.logError("Failed to save document", error)
+                );
+              }
+            })
+          );
+
+          // Broadcast to subscribers
           Effect.runSync(
             PubSub.publish(pubsub, {
               type: "transaction",
@@ -181,7 +183,7 @@ const makeDocumentManager = Effect.gen(function* () {
   const submit = (
     documentId: string,
     transaction: Transaction.Transaction
-  ): Effect.Effect<Protocol.SubmitResult, DocumentTypeNotFoundError> =>
+  ): Effect.Effect<Protocol.SubmitResult> =>
     Effect.gen(function* () {
       const instance = yield* getOrCreateDocument(documentId);
       const result = instance.document.submit(transaction);
@@ -191,7 +193,7 @@ const makeDocumentManager = Effect.gen(function* () {
   // Get a snapshot
   const getSnapshot = (
     documentId: string
-  ): Effect.Effect<Protocol.SnapshotMessage, DocumentTypeNotFoundError> =>
+  ): Effect.Effect<Protocol.SnapshotMessage> =>
     Effect.gen(function* () {
       const instance = yield* getOrCreateDocument(documentId);
       const snapshot = instance.document.getSnapshot();
@@ -203,7 +205,7 @@ const makeDocumentManager = Effect.gen(function* () {
     documentId: string
   ): Effect.Effect<
     Stream.Stream<Protocol.ServerBroadcast>,
-    DocumentTypeNotFoundError,
+    never,
     Scope.Scope
   > =>
     Effect.gen(function* () {
@@ -241,6 +243,10 @@ const makeDocumentManager = Effect.gen(function* () {
 
 /**
  * Layer that provides DocumentManager.
+ * Requires MimicServerConfigTag and MimicDataStorageTag.
  */
-export const layer: Layer.Layer<DocumentManagerTag, never, MimicServerConfigTag> =
-  Layer.effect(DocumentManagerTag, makeDocumentManager);
+export const layer: Layer.Layer<
+  DocumentManagerTag,
+  never,
+  MimicServerConfigTag | MimicDataStorageTag
+> = Layer.effect(DocumentManagerTag, makeDocumentManager);

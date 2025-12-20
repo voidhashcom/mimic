@@ -102,6 +102,46 @@ export type ClientMessage =
   | AuthMessage;
 
 // =============================================================================
+// Encoded Message Types (for network transport)
+// =============================================================================
+
+/**
+ * Encoded transaction message for network transport.
+ */
+export interface EncodedTransactionMessage {
+  readonly type: "transaction";
+  readonly transaction: Transaction.EncodedTransaction;
+  readonly version: number;
+}
+
+/**
+ * Encoded submit message for network transport.
+ */
+export interface EncodedSubmitTransactionMessage {
+  readonly type: "submit";
+  readonly transaction: Transaction.EncodedTransaction;
+}
+
+/**
+ * Union of all possible encoded server messages (for network transport).
+ */
+export type EncodedServerMessage =
+  | EncodedTransactionMessage
+  | SnapshotMessage
+  | ErrorMessage
+  | PongMessage
+  | AuthResultMessage;
+
+/**
+ * Union of all possible encoded client messages (for network transport).
+ */
+export type EncodedClientMessage =
+  | EncodedSubmitTransactionMessage
+  | RequestSnapshotMessage
+  | PingMessage
+  | AuthMessage;
+
+// =============================================================================
 // Transport Interface
 // =============================================================================
 

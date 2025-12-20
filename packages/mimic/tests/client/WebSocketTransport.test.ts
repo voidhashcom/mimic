@@ -78,6 +78,24 @@ class MockWebSocket {
     }
   }
 
+  /**
+   * Simulates a complete connection: opens the socket and sends auth_result
+   * after the transport sends the auth message.
+   * This is needed because the transport always sends an auth message on open
+   * and waits for auth_result before completing the connection.
+   * 
+   * Returns a Promise that resolves after auth is simulated.
+   */
+  simulateOpenWithAuth(): Promise<void> {
+    this.simulateOpen();
+    // The onopen handler is async and sends auth message
+    // We need to wait for it, then send auth_result
+    // Use Promise.resolve().then() to ensure we run after the microtask queue
+    return Promise.resolve().then(() => Promise.resolve()).then(() => {
+      this.simulateMessage({ type: "auth_result", success: true });
+    });
+  }
+
   simulateMessage(data: unknown): void {
     if (this.onmessage) {
       this.onmessage(new MessageEvent("message", { data: JSON.stringify(data) }));
@@ -146,7 +164,7 @@ describe("WebSocketTransport", () => {
 
       // Simulate WebSocket open
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
 
       await connectPromise;
 
@@ -179,7 +197,7 @@ describe("WebSocketTransport", () => {
       });
 
       const connectPromise = transport.connect();
-      MockWebSocket.getLatest()!.simulateOpen();
+      await MockWebSocket.getLatest()!.simulateOpenWithAuth();
       await connectPromise;
 
       expect(connectedEmitted).toBe(true);
@@ -205,7 +223,7 @@ describe("WebSocketTransport", () => {
       });
 
       const connectPromise = transport.connect();
-      MockWebSocket.getLatest()!.simulateOpen();
+      await MockWebSocket.getLatest()!.simulateOpenWithAuth();
       await connectPromise;
 
       // Should return immediately
@@ -221,7 +239,7 @@ describe("WebSocketTransport", () => {
       });
 
       const connectPromise = transport.connect();
-      MockWebSocket.getLatest()!.simulateOpen();
+      await MockWebSocket.getLatest()!.simulateOpenWithAuth();
       await connectPromise;
 
       transport.disconnect();
@@ -242,7 +260,7 @@ describe("WebSocketTransport", () => {
       });
 
       const connectPromise = transport.connect();
-      MockWebSocket.getLatest()!.simulateOpen();
+      await MockWebSocket.getLatest()!.simulateOpenWithAuth();
       await connectPromise;
 
       transport.disconnect();
@@ -272,7 +290,7 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       const tx = Transaction.make([
@@ -285,8 +303,11 @@ describe("WebSocketTransport", () => {
 
       transport.send(tx);
 
-      expect(ws.sentMessages.length).toBe(1);
-      const sent = JSON.parse(ws.sentMessages[0]!);
+      // 2 messages: auth + submit
+      expect(ws.sentMessages.length).toBe(2);
+      const authMsg = JSON.parse(ws.sentMessages[0]!);
+      expect(authMsg.type).toBe("auth");
+      const sent = JSON.parse(ws.sentMessages[1]!);
       expect(sent.type).toBe("submit");
       expect(sent.transaction.id).toBe(tx.id);
     });
@@ -299,7 +320,7 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       // Simulate connection lost
@@ -318,11 +339,14 @@ describe("WebSocketTransport", () => {
       // Reconnect
       vi.advanceTimersByTime(1000);
       const newWs = MockWebSocket.getLatest()!;
-      newWs.simulateOpen();
+      await newWs.simulateOpenWithAuth();
 
-      // Queued message should be sent
-      expect(newWs.sentMessages.length).toBe(1);
-      const sent = JSON.parse(newWs.sentMessages[0]!);
+      // Queued message should be sent after auth
+      // 2 messages: auth + submit (queued message)
+      expect(newWs.sentMessages.length).toBe(2);
+      const authMsg = JSON.parse(newWs.sentMessages[0]!);
+      expect(authMsg.type).toBe("auth");
+      const sent = JSON.parse(newWs.sentMessages[1]!);
       expect(sent.type).toBe("submit");
     });
   });
@@ -335,13 +359,16 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       transport.requestSnapshot();
 
-      expect(ws.sentMessages.length).toBe(1);
-      const sent = JSON.parse(ws.sentMessages[0]!);
+      // 2 messages: auth + request_snapshot
+      expect(ws.sentMessages.length).toBe(2);
+      const authMsg = JSON.parse(ws.sentMessages[0]!);
+      expect(authMsg.type).toBe("auth");
+      const sent = JSON.parse(ws.sentMessages[1]!);
       expect(sent.type).toBe("request_snapshot");
     });
   });
@@ -357,7 +384,7 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       ws.simulateMessage({
@@ -380,7 +407,7 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       unsubscribe();
@@ -412,7 +439,7 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       // Simulate connection lost
@@ -426,8 +453,8 @@ describe("WebSocketTransport", () => {
       // Should have created new WebSocket
       expect(MockWebSocket.instances.length).toBe(2);
 
-      // Complete reconnection
-      MockWebSocket.getLatest()!.simulateOpen();
+      // Complete reconnection (needs auth too)
+      await MockWebSocket.getLatest()!.simulateOpenWithAuth();
 
       expect(transport.isConnected()).toBe(true);
     });
@@ -441,7 +468,7 @@ describe("WebSocketTransport", () => {
       });
 
       const connectPromise = transport.connect();
-      MockWebSocket.getLatest()!.simulateOpen();
+      await MockWebSocket.getLatest()!.simulateOpenWithAuth();
       await connectPromise;
 
       // First disconnection
@@ -479,7 +506,7 @@ describe("WebSocketTransport", () => {
       });
 
       const connectPromise = transport.connect();
-      MockWebSocket.getLatest()!.simulateOpen();
+      await MockWebSocket.getLatest()!.simulateOpenWithAuth();
       await connectPromise;
 
       // First disconnection
@@ -507,7 +534,7 @@ describe("WebSocketTransport", () => {
       });
 
       const connectPromise = transport.connect();
-      MockWebSocket.getLatest()!.simulateOpen();
+      await MockWebSocket.getLatest()!.simulateOpenWithAuth();
       await connectPromise;
 
       MockWebSocket.getLatest()!.simulateClose();
@@ -529,14 +556,17 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       // Advance time to trigger heartbeat
       vi.advanceTimersByTime(5000);
 
-      expect(ws.sentMessages.length).toBe(1);
-      const sent = JSON.parse(ws.sentMessages[0]!);
+      // 2 messages: auth + ping
+      expect(ws.sentMessages.length).toBe(2);
+      const authMsg = JSON.parse(ws.sentMessages[0]!);
+      expect(authMsg.type).toBe("auth");
+      const sent = JSON.parse(ws.sentMessages[1]!);
       expect(sent.type).toBe("ping");
     });
 
@@ -549,7 +579,7 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       // Trigger heartbeat
@@ -581,7 +611,7 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
-      ws.simulateOpen();
+      await ws.simulateOpenWithAuth();
       await connectPromise;
 
       // Trigger heartbeat
@@ -603,6 +633,7 @@ describe("WebSocketTransport", () => {
 
       const connectPromise = transport.connect();
       const ws = MockWebSocket.getLatest()!;
+      // Use simulateOpen() only - we want to test auth manually
       ws.simulateOpen();
 
       // Should send auth message
@@ -663,6 +694,32 @@ describe("WebSocketTransport", () => {
 
       ws.simulateMessage({ type: "auth_result", success: true });
       await connectPromise;
+    });
+
+    it("should send empty token auth message when no authToken provided", async () => {
+      const transport = WebSocketTransport.make({
+        url: "ws://localhost:8080",
+        // No authToken provided
+      });
+
+      const connectPromise = transport.connect();
+      const ws = MockWebSocket.getLatest()!;
+      ws.simulateOpen();
+
+      // Should send auth message with empty token
+      await vi.waitFor(() => {
+        expect(ws.sentMessages.length).toBe(1);
+      });
+
+      const authMessage = JSON.parse(ws.sentMessages[0]!);
+      expect(authMessage.type).toBe("auth");
+      expect(authMessage.token).toBe("");
+
+      // Simulate auth success
+      ws.simulateMessage({ type: "auth_result", success: true });
+
+      await connectPromise;
+      expect(transport.isConnected()).toBe(true);
     });
 
     it("should reject connection on auth failure", async () => {

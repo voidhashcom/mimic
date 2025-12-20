@@ -1,4 +1,4 @@
-import type * as Transaction from "../Transaction";
+import * as Transaction from "../Transaction";
 
 import * as Transport from "./Transport";
 import { WebSocketError, AuthenticationError } from "./errors";
@@ -111,11 +111,38 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
   };
 
   /**
+   * Encodes a client message for network transport.
+   */
+  const encodeClientMessage = (message: Transport.ClientMessage): Transport.EncodedClientMessage => {
+    if (message.type === "submit") {
+      return {
+        type: "submit",
+        transaction: Transaction.encode(message.transaction),
+      };
+    }
+    return message;
+  };
+
+  /**
+   * Decodes a server message from network transport.
+   */
+  const decodeServerMessage = (encoded: Transport.EncodedServerMessage): Transport.ServerMessage => {
+    if (encoded.type === "transaction") {
+      return {
+        type: "transaction",
+        transaction: Transaction.decode(encoded.transaction),
+        version: encoded.version,
+      };
+    }
+    return encoded;
+  };
+
+  /**
    * Sends a raw message over the WebSocket.
    */
   const sendRaw = (message: Transport.ClientMessage): void => {
     if (_ws && _ws.readyState === WebSocket.OPEN) {
-      _ws.send(JSON.stringify(message));
+      _ws.send(JSON.stringify(encodeClientMessage(message)));
     }
   };
 
@@ -206,20 +233,20 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
 
   /**
    * Resolves the auth token (handles both string and function).
+   * Returns empty string if no token is configured.
    */
-  const resolveAuthToken = async (): Promise<string | undefined> => {
-    if (!authToken) return undefined;
+  const resolveAuthToken = async (): Promise<string> => {
+    if (!authToken) return "";
     if (typeof authToken === "string") return authToken;
     return authToken();
   };
 
   /**
    * Performs authentication after connection.
+   * Always sends an auth message (even with empty token) to trigger server auth flow.
    */
   const authenticate = async (): Promise<void> => {
     const token = await resolveAuthToken();
-    if (!token) return;
-
     _state = { type: "authenticating" };
     sendRaw({ type: "auth", token });
   };
@@ -369,13 +396,9 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
       }
 
       try {
-        // Authenticate if token provided
-        if (authToken) {
-          await authenticate();
-          // Don't complete connection yet - wait for auth_result
-        } else {
-          completeConnection();
-        }
+        // Always authenticate (even with empty token) to trigger server auth flow
+        await authenticate();
+        // Connection completes after auth_result is received
       } catch (error) {
         handleConnectionLost((error as Error).message);
       }
@@ -391,7 +414,8 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
 
     _ws.onmessage = (event) => {
       try {
-        const message = JSON.parse(event.data as string) as Transport.ServerMessage;
+        const encoded = JSON.parse(event.data as string) as Transport.EncodedServerMessage;
+        const message = decodeServerMessage(encoded);
         handleMessage(message);
       } catch {
         // Invalid message - ignore

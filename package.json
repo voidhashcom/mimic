@@ -23,7 +23,9 @@
       "packages/*"
     ],
     "catalog": {
-      "effect": "^3.18.4"
+      "effect": "^3.19.12",
+      "@effect/platform": "^0.93.8",
+      "@effect/platform-bun": "^0.86.0"
     }
   }
 }

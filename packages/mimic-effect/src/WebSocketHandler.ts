@@ -8,9 +8,11 @@ import * as Fiber from "effect/Fiber";
 import * as Scope from "effect/Scope";
 import * as Duration from "effect/Duration";
 import type * as Socket from "@effect/platform/Socket";
+import { Transaction } from "@voidhash/mimic";
 
 import * as Protocol from "./DocumentProtocol.js";
 import { MimicServerConfigTag } from "./MimicConfig.js";
+import { MimicAuthServiceTag } from "./MimicAuthService.js";
 import { DocumentManagerTag } from "./DocumentManager.js";
 import {
   MessageParseError,
@@ -24,6 +26,11 @@ import {
 interface SubmitMessage {
   readonly type: "submit";
   readonly transaction: Protocol.Transaction;
+}
+
+interface EncodedSubmitMessage {
+  readonly type: "submit";
+  readonly transaction: Transaction.EncodedTransaction;
 }
 
 interface RequestSnapshotMessage {
@@ -45,6 +52,12 @@ type ClientMessage =
   | PingMessage
   | AuthMessage;
 
+type EncodedClientMessage =
+  | EncodedSubmitMessage
+  | RequestSnapshotMessage
+  | PingMessage
+  | AuthMessage;
+
 // =============================================================================
 // Server Message Types (matching mimic-client Transport.ts)
 // =============================================================================
@@ -59,8 +72,21 @@ interface AuthResultMessage {
   readonly error?: string;
 }
 
+interface EncodedTransactionMessage {
+  readonly type: "transaction";
+  readonly transaction: Transaction.EncodedTransaction;
+  readonly version: number;
+}
+
 type ServerMessage =
   | Protocol.TransactionMessage
+  | Protocol.SnapshotMessage
+  | Protocol.ErrorMessage
+  | PongMessage
+  | AuthResultMessage;
+
+type EncodedServerMessage =
+  | EncodedTransactionMessage
   | Protocol.SnapshotMessage
   | Protocol.ErrorMessage
   | PongMessage
@@ -83,7 +109,7 @@ interface ConnectionState {
 
 /**
  * Extract document ID from URL path.
- * Expected format: /doc/{documentId} or /{documentId}
+ * Expected format: /doc/{documentId}
  */
 export const extractDocumentId = (
   path: string
@@ -91,22 +117,45 @@ export const extractDocumentId = (
   // Remove leading slash and split
   const parts = path.replace(/^\/+/, "").split("/");
 
-  // Check for /doc/{documentId} format
-  if (parts[0] === "doc" && parts[1]) {
-    return Effect.succeed(decodeURIComponent(parts[1]));
+  // Find the last occurrence of 'doc' in the path
+  const docIndex = parts.lastIndexOf("doc");
+  const part = parts[docIndex + 1];
+  if (docIndex !== -1 && part) {
+    return Effect.succeed(decodeURIComponent(part));
   }
-
-  // Check for /{documentId} format
-  if (parts[0] && parts[0] !== "doc") {
-    return Effect.succeed(decodeURIComponent(parts[0]));
-  }
-
   return Effect.fail(new MissingDocumentIdError({}));
 };
 
 // =============================================================================
 // Message Parsing
 // =============================================================================
+
+/**
+ * Decodes an encoded client message from the wire format.
+ */
+const decodeClientMessage = (encoded: EncodedClientMessage): ClientMessage => {
+  if (encoded.type === "submit") {
+    return {
+      type: "submit",
+      transaction: Transaction.decode(encoded.transaction),
+    };
+  }
+  return encoded;
+};
+
+/**
+ * Encodes a server message for the wire format.
+ */
+const encodeServerMessageForWire = (message: ServerMessage): EncodedServerMessage => {
+  if (message.type === "transaction") {
+    return {
+      type: "transaction",
+      transaction: Transaction.encode(message.transaction),
+      version: message.version,
+    };
+  }
+  return message;
+};
 
 const parseClientMessage = (
   data: string | Uint8Array
@@ -115,13 +164,14 @@ const parseClientMessage = (
     try: () => {
       const text =
         typeof data === "string" ? data : new TextDecoder().decode(data);
-      return JSON.parse(text) as ClientMessage;
+      const encoded = JSON.parse(text) as EncodedClientMessage;
+      return decodeClientMessage(encoded);
     },
     catch: (cause) => new MessageParseError({ cause }),
   });
 
 const encodeServerMessage = (message: ServerMessage): string =>
-  JSON.stringify(message);
+  JSON.stringify(encodeServerMessageForWire(message));
 
 // =============================================================================
 // WebSocket Handler
@@ -140,10 +190,11 @@ export const handleConnection = (
 ): Effect.Effect<
   void,
   Socket.SocketError | MissingDocumentIdError | MessageParseError,
-  MimicServerConfigTag | DocumentManagerTag | Scope.Scope
+  MimicServerConfigTag | MimicAuthServiceTag | DocumentManagerTag | Scope.Scope
 > =>
   Effect.gen(function* () {
     const config = yield* MimicServerConfigTag;
+    const authService = yield* MimicAuthServiceTag;
     const documentManager = yield* DocumentManagerTag;
 
     // Extract document ID from path
@@ -154,7 +205,7 @@ export const handleConnection = (
     let state: ConnectionState = {
       documentId,
       connectionId,
-      authenticated: !config.authHandler, // If no auth handler, consider authenticated
+      authenticated: false, // Start unauthenticated, auth service will validate
     };
 
     // Get the socket writer
@@ -164,19 +215,10 @@ export const handleConnection = (
     const sendMessage = (message: ServerMessage) =>
       write(encodeServerMessage(message));
 
-    // Handle authentication
+    // Handle authentication using the auth service
     const handleAuth = (token: string) =>
       Effect.gen(function* () {
-        if (!config.authHandler) {
-          // No auth configured, auto-succeed
-          yield* sendMessage({ type: "auth_result", success: true });
-          state = { ...state, authenticated: true };
-          return;
-        }
-
-        const result = yield* Effect.promise(() =>
-          Promise.resolve(config.authHandler!(token))
-        );
+        const result = yield* authService.authenticate(token);
 
         if (result.success) {
           state = {
@@ -216,16 +258,9 @@ export const handleConnection = (
               return;
             }
             // Submit to the document manager
-            const submitResult = yield* Effect.catchAll(
-              documentManager.submit(
-                documentId,
-                message.transaction as any
-              ),
-              (error) =>
-                Effect.succeed({
-                  success: false as const,
-                  reason: error.message,
-                })
+            const submitResult = yield* documentManager.submit(
+              documentId,
+              message.transaction as any
             );
             // If rejected, send error (success is broadcast to all)
             if (!submitResult.success) {
@@ -303,16 +338,153 @@ export const handleConnection = (
 
 /**
  * Create a handler function for the WebSocket server.
- * This extracts the path from the socket and calls handleConnection.
+ * Returns a function that takes a socket and document ID.
  */
 export const makeHandler = Effect.gen(function* () {
   const config = yield* MimicServerConfigTag;
+  const authService = yield* MimicAuthServiceTag;
   const documentManager = yield* DocumentManagerTag;
 
-  return (socket: Socket.Socket, path: string) =>
-    handleConnection(socket, path).pipe(
+  return (socket: Socket.Socket, documentId: string) =>
+    handleConnectionWithDocumentId(socket, documentId).pipe(
       Effect.provideService(MimicServerConfigTag, config),
+      Effect.provideService(MimicAuthServiceTag, authService),
       Effect.provideService(DocumentManagerTag, documentManager),
       Effect.scoped
     );
 });
+
+/**
+ * Handle a WebSocket connection for a document (using document ID directly).
+ */
+const handleConnectionWithDocumentId = (
+  socket: Socket.Socket,
+  documentId: string
+): Effect.Effect<
+  void,
+  Socket.SocketError | MessageParseError,
+  MimicServerConfigTag | MimicAuthServiceTag | DocumentManagerTag | Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const config = yield* MimicServerConfigTag;
+    const authService = yield* MimicAuthServiceTag;
+    const documentManager = yield* DocumentManagerTag;
+
+    const connectionId = crypto.randomUUID();
+
+    // Track connection state
+    let state: ConnectionState = {
+      documentId,
+      connectionId,
+      authenticated: false,
+    };
+
+    // Get the socket writer
+    const write = yield* socket.writer;
+
+    // Helper to send a message to the client
+    const sendMessage = (message: ServerMessage) =>
+      write(encodeServerMessage(message));
+
+    // Handle authentication using the auth service
+    const handleAuth = (token: string) =>
+      Effect.gen(function* () {
+        const result = yield* authService.authenticate(token);
+
+        if (result.success) {
+          state = {
+            ...state,
+            authenticated: true,
+            userId: result.userId,
+          };
+          yield* sendMessage({ type: "auth_result", success: true });
+        } else {
+          yield* sendMessage({
+            type: "auth_result",
+            success: false,
+            error: result.error,
+          });
+        }
+      });
+
+    // Handle a client message
+    const handleMessage = (message: ClientMessage) =>
+      Effect.gen(function* () {
+        switch (message.type) {
+          case "auth":
+            yield* handleAuth(message.token);
+            break;
+
+          case "ping":
+            yield* sendMessage({ type: "pong" });
+            break;
+
+          case "submit":
+            if (!state.authenticated) {
+              yield* sendMessage({
+                type: "error",
+                transactionId: message.transaction.id,
+                reason: "Not authenticated",
+              });
+              return;
+            }
+            const submitResult = yield* documentManager.submit(
+              documentId,
+              message.transaction as any
+            );
+            if (!submitResult.success) {
+              yield* sendMessage({
+                type: "error",
+                transactionId: message.transaction.id,
+                reason: submitResult.reason,
+              });
+            }
+            break;
+
+          case "request_snapshot":
+            if (!state.authenticated) {
+              return;
+            }
+            const snapshot = yield* documentManager.getSnapshot(documentId);
+            yield* sendMessage(snapshot);
+            break;
+        }
+      });
+
+    // Subscribe to document broadcasts
+    const subscribeFiber = yield* Effect.fork(
+      Effect.gen(function* () {
+        // Wait until authenticated before subscribing
+        while (!state.authenticated) {
+          yield* Effect.sleep(Duration.millis(100));
+        }
+
+        // Subscribe to the document
+        const broadcastStream = yield* documentManager.subscribe(documentId);
+
+        // Forward broadcasts to the WebSocket
+        yield* Stream.runForEach(broadcastStream, (broadcast) =>
+          sendMessage(broadcast as ServerMessage)
+        );
+      }).pipe(Effect.scoped)
+    );
+
+    // Ensure cleanup on disconnect
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        yield* Fiber.interrupt(subscribeFiber);
+      })
+    );
+
+    // Process incoming messages
+    yield* socket.runRaw((data) =>
+      Effect.gen(function* () {
+        const message = yield* parseClientMessage(data);
+        yield* handleMessage(message);
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.logError("Message handling error", error)
+        )
+      )
+    );
+  });

@@ -62,6 +62,20 @@ export interface ClientDocumentOptions<TSchema extends Primitive.AnyPrimitive> {
   readonly transactionTimeout?: number;
   /** Timeout in ms for initialization (default: 10000) */
   readonly initTimeout?: number;
+  /** Enable debug logging for all activity (default: false) */
+  readonly debug?: boolean;
+}
+
+/**
+ * Listener callbacks for subscribing to ClientDocument events.
+ */
+export interface ClientDocumentListener<TSchema extends Primitive.AnyPrimitive> {
+  /** Called when optimistic state changes */
+  readonly onStateChange?: (state: Primitive.InferState<TSchema> | undefined) => void;
+  /** Called when connection status changes */
+  readonly onConnectionChange?: (connected: boolean) => void;
+  /** Called when client is fully initialized and ready */
+  readonly onReady?: () => void;
 }
 
 /**
@@ -119,6 +133,12 @@ export interface ClientDocument<TSchema extends Primitive.AnyPrimitive> {
    * Returns whether the client is fully initialized and ready.
    */
   isReady(): boolean;
+
+  /**
+   * Subscribes to document events (state changes, connection changes, ready).
+   * @returns Unsubscribe function
+   */
+  subscribe(listener: ClientDocumentListener<TSchema>): () => void;
 }
 
 // =============================================================================
@@ -142,6 +162,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     onReady,
     transactionTimeout = 30000,
     initTimeout = 10000,
+    debug = false,
   } = options;
 
   // ==========================================================================
@@ -180,6 +201,70 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   let _initResolver: (() => void) | null = null;
   let _initRejecter: ((error: Error) => void) | null = null;
 
+  // Subscribers for events (added after creation via subscribe())
+  const _subscribers = new Set<ClientDocumentListener<TSchema>>();
+
+  // ==========================================================================
+  // Debug Logging
+  // ==========================================================================
+
+  /**
+   * Debug logging helper that only logs when debug is enabled.
+   */
+  const debugLog = (...args: unknown[]): void => {
+    if (debug) {
+      console.log("[ClientDocument]", ...args);
+    }
+  };
+
+  // ==========================================================================
+  // Notification Helpers
+  // ==========================================================================
+
+  /**
+   * Notifies all listeners of a state change.
+   */
+  const notifyStateChange = (state: Primitive.InferState<TSchema> | undefined): void => {
+    debugLog("notifyStateChange", {
+      state,
+      subscriberCount: _subscribers.size,
+      hasOnStateChange: !!onStateChange,
+    });
+    onStateChange?.(state);
+    for (const listener of _subscribers) {
+      listener.onStateChange?.(state);
+    }
+  };
+
+  /**
+   * Notifies all listeners of a connection change.
+   */
+  const notifyConnectionChange = (connected: boolean): void => {
+    debugLog("notifyConnectionChange", {
+      connected,
+      subscriberCount: _subscribers.size,
+      hasOnConnectionChange: !!onConnectionChange,
+    });
+    onConnectionChange?.(connected);
+    for (const listener of _subscribers) {
+      listener.onConnectionChange?.(connected);
+    }
+  };
+
+  /**
+   * Notifies all listeners when ready.
+   */
+  const notifyReady = (): void => {
+    debugLog("notifyReady", {
+      subscriberCount: _subscribers.size,
+      hasOnReady: !!onReady,
+    });
+    onReady?.();
+    for (const listener of _subscribers) {
+      listener.onReady?.();
+    }
+  };
+
   // ==========================================================================
   // Helper Functions
   // ==========================================================================
@@ -188,6 +273,12 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
    * Recomputes the optimistic document from server state + pending transactions.
    */
   const recomputeOptimisticState = (): void => {
+    debugLog("recomputeOptimisticState", {
+      serverVersion: _serverVersion,
+      pendingCount: _pending.length,
+      serverState: _serverState,
+    });
+
     // Create fresh document from server state
     _optimisticDoc = Document.make(schema, { initial: _serverState });
 
@@ -196,8 +287,11 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       _optimisticDoc.apply(pending.transaction.ops);
     }
 
+    const newState = _optimisticDoc.get();
+    debugLog("recomputeOptimisticState: new optimistic state", newState);
+
     // Notify state change
-    onStateChange?.(_optimisticDoc.get());
+    notifyStateChange(newState);
   };
 
   /**
@@ -207,6 +301,12 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     if (!transport.isConnected()) {
       throw new NotConnectedError();
     }
+
+    debugLog("submitTransaction", {
+      txId: tx.id,
+      ops: tx.ops,
+      pendingCount: _pending.length + 1,
+    });
 
     const pending: PendingTransaction = {
       transaction: tx,
@@ -224,18 +324,28 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
     // Send to server
     transport.send(tx);
+    debugLog("submitTransaction: sent to server", { txId: tx.id });
   };
 
   /**
    * Handles a transaction timeout.
    */
   const handleTransactionTimeout = (txId: string): void => {
+    debugLog("handleTransactionTimeout", { txId });
     const index = _pending.findIndex((p) => p.transaction.id === txId);
-    if (index === -1) return; // Already confirmed or rejected
+    if (index === -1) {
+      debugLog("handleTransactionTimeout: transaction not found (already confirmed/rejected)", { txId });
+      return; // Already confirmed or rejected
+    }
 
     // Remove from pending
     const [removed] = _pending.splice(index, 1);
     _timeoutHandles.delete(txId);
+
+    debugLog("handleTransactionTimeout: removed from pending", {
+      txId,
+      remainingPending: _pending.length,
+    });
 
     // Recompute state
     recomputeOptimisticState();
@@ -251,6 +361,14 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     serverTx: Transaction.Transaction,
     version: number
   ): void => {
+    debugLog("handleServerTransaction", {
+      txId: serverTx.id,
+      version,
+      ops: serverTx.ops,
+      currentServerVersion: _serverVersion,
+      pendingCount: _pending.length,
+    });
+
     // Update server version
     _serverVersion = version;
 
@@ -261,6 +379,11 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
     if (pendingIndex !== -1) {
       // This is our transaction - confirmed!
+      debugLog("handleServerTransaction: transaction confirmed (ACK)", {
+        txId: serverTx.id,
+        pendingIndex,
+      });
+
       const confirmed = _pending[pendingIndex]!;
 
       // Clear timeout
@@ -278,10 +401,21 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       tempDoc.apply(serverTx.ops);
       _serverState = tempDoc.get();
 
+      debugLog("handleServerTransaction: updated server state", {
+        txId: serverTx.id,
+        newServerState: _serverState,
+        remainingPending: _pending.length,
+      });
+
       // Recompute optimistic state (pending txs already applied, just need to update base)
       recomputeOptimisticState();
     } else {
       // This is someone else's transaction - need to rebase
+      debugLog("handleServerTransaction: remote transaction, rebasing pending", {
+        txId: serverTx.id,
+        pendingCount: _pending.length,
+      });
+
       // Apply to server state
       const tempDoc = Document.make(schema, { initial: _serverState });
       tempDoc.apply(serverTx.ops);
@@ -294,10 +428,19 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       }
 
       // Rebase all pending transactions using primitive-based transformation
-      _pending = _pending.map((p) => ({
+      const rebasedPending = _pending.map((p) => ({
         ...p,
         transaction: Rebase.transformTransactionWithPrimitive(p.transaction, serverTx, schema),
       }));
+
+      debugLog("handleServerTransaction: rebased pending transactions", {
+        txId: serverTx.id,
+        rebasedCount: rebasedPending.length,
+        originalPendingIds: _pending.map((p) => p.transaction.id),
+        rebasedPendingIds: rebasedPending.map((p) => p.transaction.id),
+      });
+
+      _pending = rebasedPending;
 
       // Recompute optimistic state
       recomputeOptimisticState();
@@ -308,8 +451,17 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
    * Handles a transaction rejection from the server.
    */
   const handleRejection = (txId: string, reason: string): void => {
+    debugLog("handleRejection", {
+      txId,
+      reason,
+      pendingCount: _pending.length,
+    });
+
     const index = _pending.findIndex((p) => p.transaction.id === txId);
-    if (index === -1) return; // Already removed
+    if (index === -1) {
+      debugLog("handleRejection: transaction not found (already removed)", { txId });
+      return; // Already removed
+    }
 
     const rejected = _pending[index]!;
 
@@ -322,6 +474,12 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
     // Remove rejected transaction
     _pending.splice(index, 1);
+
+    debugLog("handleRejection: removed rejected transaction, rebasing remaining", {
+      txId,
+      remainingPending: _pending.length,
+      serverHistorySize: _serverTransactionHistory.length,
+    });
 
     // Re-transform remaining pending transactions without the rejected one
     // We need to replay from their original state
@@ -339,6 +497,11 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       transaction: retransformed[i] ?? p.transaction,
     }));
 
+    debugLog("handleRejection: rebased remaining transactions", {
+      txId,
+      rebasedCount: _pending.length,
+    });
+
     // Recompute optimistic state
     recomputeOptimisticState();
 
@@ -351,7 +514,19 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
    * @param isInitialSnapshot - If true, this is the initial sync snapshot
    */
   const handleSnapshot = (state: unknown, version: number, isInitialSnapshot: boolean = false): void => {
+    debugLog("handleSnapshot", {
+      isInitialSnapshot,
+      version,
+      currentServerVersion: _serverVersion,
+      pendingCount: _pending.length,
+      state,
+    });
+
     if (!isInitialSnapshot) {
+      debugLog("handleSnapshot: non-initial snapshot, clearing pending transactions", {
+        clearedPendingCount: _pending.length,
+      });
+
       // For non-initial snapshots, clear all pending (they're now invalid)
       for (const handle of _timeoutHandles.values()) {
         clearTimeout(handle);
@@ -370,6 +545,11 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     _serverState = state as Primitive.InferState<TSchema>;
     _serverVersion = version;
 
+    debugLog("handleSnapshot: updated server state", {
+      newVersion: _serverVersion,
+      newState: _serverState,
+    });
+
     // Recompute optimistic state (now equals server state)
     recomputeOptimisticState();
   };
@@ -383,6 +563,11 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     bufferedMessages: Transport.ServerMessage[],
     snapshotVersion: number
   ): void => {
+    debugLog("processBufferedMessages", {
+      bufferedCount: bufferedMessages.length,
+      snapshotVersion,
+    });
+
     // Sort transactions by version to ensure correct order
     const sortedMessages = [...bufferedMessages].sort((a, b) => {
       if (a.type === "transaction" && b.type === "transaction") {
@@ -397,11 +582,26 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
         case "transaction":
           // Only apply transactions with version > snapshot version
           if (message.version > snapshotVersion) {
+            debugLog("processBufferedMessages: applying buffered transaction", {
+              txId: message.transaction.id,
+              version: message.version,
+              snapshotVersion,
+            });
             handleServerTransaction(message.transaction, message.version);
+          } else {
+            debugLog("processBufferedMessages: skipping buffered transaction (already in snapshot)", {
+              txId: message.transaction.id,
+              version: message.version,
+              snapshotVersion,
+            });
           }
           break;
         case "error":
           // Errors are still relevant - pass through
+          debugLog("processBufferedMessages: processing buffered error", {
+            txId: message.transactionId,
+            reason: message.reason,
+          });
           handleRejection(message.transactionId, message.reason);
           break;
         // Ignore additional snapshots in buffer - we already have one
@@ -413,6 +613,8 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
    * Completes initialization and transitions to ready state.
    */
   const completeInitialization = (): void => {
+    debugLog("completeInitialization");
+
     // Clear init timeout
     if (_initTimeoutHandle !== null) {
       clearTimeout(_initTimeoutHandle);
@@ -428,14 +630,20 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       _initRejecter = null;
     }
 
+    debugLog("completeInitialization: ready", {
+      serverVersion: _serverVersion,
+      serverState: _serverState,
+    });
+
     // Notify ready
-    onReady?.();
+    notifyReady();
   };
 
   /**
    * Handles initialization timeout.
    */
   const handleInitTimeout = (): void => {
+    debugLog("handleInitTimeout: initialization timed out");
     _initTimeoutHandle = null;
 
     // Reject the connect promise
@@ -455,15 +663,28 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
    * During initialization, messages are buffered until the snapshot arrives.
    */
   const handleServerMessage = (message: Transport.ServerMessage): void => {
+    debugLog("handleServerMessage", {
+      messageType: message.type,
+      initState: _initState.type,
+    });
+
     // Handle based on initialization state
     if (_initState.type === "initializing") {
       if (message.type === "snapshot") {
+        debugLog("handleServerMessage: received snapshot during initialization", {
+          version: message.version,
+          bufferedCount: _initState.bufferedMessages.length,
+        });
         // Snapshot received - apply it and process buffered messages
         const buffered = _initState.bufferedMessages;
         handleSnapshot(message.state, message.version, true);
         processBufferedMessages(buffered, message.version);
         completeInitialization();
       } else {
+        debugLog("handleServerMessage: buffering message during initialization", {
+          messageType: message.type,
+          bufferedCount: _initState.bufferedMessages.length + 1,
+        });
         // Buffer other messages during initialization
         _initState.bufferedMessages.push(message);
       }
@@ -506,6 +727,12 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     hasPendingChanges: () => _pending.length > 0,
 
     transaction: <R,>(fn: (root: Primitive.InferProxy<TSchema>) => R): R => {
+      debugLog("transaction: starting", {
+        isConnected: transport.isConnected(),
+        isReady: _initState.type === "ready",
+        pendingCount: _pending.length,
+      });
+
       if (!transport.isConnected()) {
         throw new NotConnectedError();
       }
@@ -522,32 +749,44 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
       // If there are operations, submit to server
       if (!Transaction.isEmpty(tx)) {
+        debugLog("transaction: flushed, submitting", {
+          txId: tx.id,
+          opsCount: tx.ops.length,
+        });
         submitTransaction(tx);
+      } else {
+        debugLog("transaction: flushed, empty transaction (no ops)");
       }
 
       // Notify state change
-      onStateChange?.(_optimisticDoc.get());
+      notifyStateChange(_optimisticDoc.get());
 
       return result;
     },
 
     connect: async (): Promise<void> => {
+      debugLog("connect: starting");
       // Subscribe to server messages
       _unsubscribe = transport.subscribe(handleServerMessage);
 
       // Connect transport
       await transport.connect();
+      debugLog("connect: transport connected");
 
-      onConnectionChange?.(true);
+      notifyConnectionChange(true);
 
       // If we already have initial state, we're ready immediately
       if (_initState.type === "ready") {
-        onReady?.();
+        debugLog("connect: already ready (has initial state)");
+        notifyReady();
         return;
       }
 
       // Enter initializing state - buffer messages until snapshot arrives
       _initState = { type: "initializing", bufferedMessages: [] };
+      debugLog("connect: entering initializing state", {
+        initTimeout,
+      });
 
       // Set up initialization timeout
       _initTimeoutHandle = setTimeout(handleInitTimeout, initTimeout);
@@ -559,13 +798,20 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       });
 
       // Request initial snapshot
+      debugLog("connect: requesting initial snapshot");
       transport.requestSnapshot();
 
       // Wait for initialization to complete
       await readyPromise;
+      debugLog("connect: completed");
     },
 
     disconnect: (): void => {
+      debugLog("disconnect: starting", {
+        pendingCount: _pending.length,
+        initState: _initState.type,
+      });
+
       // Clear all timeouts
       for (const handle of _timeoutHandles.values()) {
         clearTimeout(handle);
@@ -599,7 +845,8 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       // Disconnect transport
       transport.disconnect();
 
-      onConnectionChange?.(false);
+      notifyConnectionChange(false);
+      debugLog("disconnect: completed");
     },
 
     isConnected: () => transport.isConnected(),
@@ -607,10 +854,21 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     isReady: () => _initState.type === "ready",
 
     resync: (): void => {
+      debugLog("resync: requesting snapshot", {
+        currentVersion: _serverVersion,
+        pendingCount: _pending.length,
+      });
       if (!transport.isConnected()) {
         throw new NotConnectedError();
       }
       transport.requestSnapshot();
+    },
+
+    subscribe: (listener: ClientDocumentListener<TSchema>): (() => void) => {
+      _subscribers.add(listener);
+      return () => {
+        _subscribers.delete(listener);
+      };
     },
   };
 

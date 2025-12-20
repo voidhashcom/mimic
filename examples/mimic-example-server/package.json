@@ -1,0 +1,33 @@
+{
+  "name": "@voidhash/mimic-server-example",
+  "version": "0.0.1-alpha.1",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voidhashcom/mimic",
+    "directory": "examples/mimic-server-example"
+  },
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --env disable --sourcemap=external",
+    "start": "bun run dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform": "catalog:",
+    "@effect/platform-bun": "catalog:",
+    "@voidhash/mimic": "workspace:*",
+    "@voidhash/mimic-effect": "workspace:*",
+    "@voidhash/mimic-example-shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.26.0",
+    "@voidhash/tsconfig": "workspace:*",
+    "typescript": "5.8.3",
+    "vitest": "^3.2.4",
+    "vite-tsconfig-paths": "^5.1.4"
+  }
+}

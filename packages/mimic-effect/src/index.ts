@@ -13,71 +13,35 @@
 export * as MimicServer from "./MimicServer.js";
 
 // =============================================================================
+// Service Interfaces
+// =============================================================================
+
+export * as MimicDataStorage from "./MimicDataStorage.js";
+export * as MimicAuthService from "./MimicAuthService.js";
+
+// =============================================================================
+// Default Implementations
+// =============================================================================
+
+export * as MimicInMemoryDataStorage from "./storage/InMemoryDataStorage.js";
+export * as MimicNoAuth from "./auth/NoAuth.js";
+
+// =============================================================================
 // Configuration
 // =============================================================================
 
-export {
-  MimicServerConfigTag,
-  type MimicServerConfig,
-  type MimicServerConfigOptions,
-  type SchemaRegistry,
-  type AuthHandler,
-  type AuthResult,
-  type PersistenceMode,
-  makeSchemaRegistry,
-  make as makeConfig,
-  layer as configLayer,
-} from "./MimicConfig.js";
+export * as MimicConfig from "./MimicConfig.js";
 
 // =============================================================================
-// Document Manager
+// Internal Components (for advanced usage)
 // =============================================================================
 
-export {
-  DocumentManagerTag,
-  type DocumentManager,
-  layer as documentManagerLayer,
-} from "./DocumentManager.js";
-
-// =============================================================================
-// Protocol
-// =============================================================================
-
-export {
-  TransactionSchema,
-  TransactionMessageSchema,
-  SnapshotMessageSchema,
-  ErrorMessageSchema,
-  SubmitResultSchema,
-  type Transaction,
-  type TransactionMessage,
-  type SnapshotMessage,
-  type ErrorMessage,
-  type SubmitResult,
-  type ServerBroadcast,
-} from "./DocumentProtocol.js";
-
-// =============================================================================
-// WebSocket Handler
-// =============================================================================
-
-export {
-  handleConnection,
-  extractDocumentId,
-  makeHandler as makeWebSocketHandler,
-} from "./WebSocketHandler.js";
+export * as DocumentManager from "./DocumentManager.js";
+export * as WebSocketHandler from "./WebSocketHandler.js";
+export * as DocumentProtocol from "./DocumentProtocol.js";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export {
-  DocumentTypeNotFoundError,
-  DocumentNotFoundError,
-  AuthenticationError,
-  TransactionRejectedError,
-  MessageParseError,
-  InvalidConnectionError,
-  MissingDocumentIdError,
-  type MimicServerError,
-} from "./errors.js";
+export * from "./errors.js";

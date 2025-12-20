@@ -23,9 +23,9 @@ describe("WebSocketHandler", () => {
       expect(result).toBe("my-document-id");
     });
 
-    it("should extract document ID from /{id} path (short form)", () => {
+    it("should extract document ID from nested paths like /mimic/todo/doc/{id}", () => {
       const result = Effect.runSync(
-        WebSocketHandler.extractDocumentId("/my-document-id")
+        WebSocketHandler.extractDocumentId("/mimic/todo/doc/my-document-id")
       );
       expect(result).toBe("my-document-id");
     });

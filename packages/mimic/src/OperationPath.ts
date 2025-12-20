@@ -172,3 +172,26 @@ export const getRelativePath = (
 
   return fullTokens.slice(baseTokens.length);
 };
+
+/**
+ * Encoded representation of an OperationPath for network transport.
+ */
+export type EncodedOperationPath = string;
+
+/**
+ * Encodes an OperationPath to a string for network transport.
+ * @param path - The operation path to encode.
+ * @returns The encoded string representation.
+ */
+export const encode = (path: OperationPath): EncodedOperationPath => {
+  return makeStringPathFromTokens(path.toTokens());
+};
+
+/**
+ * Decodes an encoded string back to an OperationPath.
+ * @param encoded - The encoded string representation.
+ * @returns The decoded OperationPath.
+ */
+export const decode = (encoded: EncodedOperationPath): OperationPath => {
+  return make(encoded);
+};

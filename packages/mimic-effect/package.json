@@ -21,7 +21,7 @@
     "test": "vitest run -c vitest.mts"
   },
   "dependencies": {
-    "@effect/platform": "^0.82.0"
+    "@effect/platform": "^0.93.8"
   },
   "devDependencies": {
     "@effect/vitest": "^0.26.0",

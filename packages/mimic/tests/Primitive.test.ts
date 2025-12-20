@@ -2054,3 +2054,997 @@ describe("transformOperation", () => {
     });
   });
 });
+
+// =============================================================================
+// TreeNode Primitive Tests
+// =============================================================================
+
+describe("TreeNodePrimitive", () => {
+  it("creates a TreeNode with type, data, and empty children", () => {
+    const FileNode = Primitive.TreeNode("file", {
+      data: Primitive.Struct({ name: Primitive.String(), size: Primitive.Number() }),
+      children: [],
+    });
+
+    expect(FileNode.type).toBe("file");
+    expect(FileNode.data).toBeInstanceOf(Primitive.StructPrimitive);
+    expect(FileNode.children).toEqual([]);
+  });
+
+  it("creates a TreeNode with lazy children for self-reference", () => {
+    const FolderNode: Primitive.AnyTreeNodePrimitive = Primitive.TreeNode("folder", {
+      data: Primitive.Struct({ name: Primitive.String() }),
+      children: (): readonly Primitive.AnyTreeNodePrimitive[] => [FolderNode],
+    });
+
+    expect(FolderNode.type).toBe("folder");
+    expect(FolderNode.children).toHaveLength(1);
+    expect(FolderNode.children[0]).toBe(FolderNode);
+  });
+
+  it("isChildAllowed returns true for allowed child types", () => {
+    const FileNode = Primitive.TreeNode("file", {
+      data: Primitive.Struct({ name: Primitive.String() }),
+      children: [],
+    });
+
+    const FolderNode: Primitive.AnyTreeNodePrimitive = Primitive.TreeNode("folder", {
+      data: Primitive.Struct({ name: Primitive.String() }),
+      children: (): readonly Primitive.AnyTreeNodePrimitive[] => [FolderNode, FileNode],
+    });
+
+    expect(FolderNode.isChildAllowed("folder")).toBe(true);
+    expect(FolderNode.isChildAllowed("file")).toBe(true);
+    expect(FolderNode.isChildAllowed("unknown")).toBe(false);
+    expect(FileNode.isChildAllowed("file")).toBe(false);
+  });
+});
+
+// =============================================================================
+// Tree Primitive Tests
+// =============================================================================
+
+describe("TreePrimitive", () => {
+  // Define node types using the new TreeNode API
+  const FileNode = Primitive.TreeNode("file", {
+    data: Primitive.Struct({ name: Primitive.String(), size: Primitive.Number() }),
+    children: [] as const,
+  });
+
+  const FolderNode = Primitive.TreeNode("folder", {
+    data: Primitive.Struct({ name: Primitive.String() }),
+    children: (): readonly Primitive.AnyTreeNodePrimitive[] => [FolderNode, FileNode],
+  });
+
+  const fileSystemTree = Primitive.Tree({
+    root: FolderNode,
+  });
+
+  // Helper to create a mock environment with state access
+  const createEnvWithState = (
+    state: Primitive.TreeState<typeof FolderNode> = []
+  ): { env: ReturnType<typeof ProxyEnvironment.make>; operations: Operation.Operation<any, any, any>[] } => {
+    const operations: Operation.Operation<any, any, any>[] = [];
+    let currentState = [...state] as Primitive.TreeState<typeof FolderNode>;
+    let idCounter = 0;
+
+    const env = ProxyEnvironment.make({
+      onOperation: (op) => {
+        operations.push(op);
+        // Apply operation to keep state in sync
+        currentState = fileSystemTree._internal.applyOperation(currentState, op);
+      },
+      getState: () => currentState,
+      generateId: () => `node-${++idCounter}`,
+    });
+
+    return { env, operations };
+  };
+
+  describe("schema", () => {
+    it("exposes root node type", () => {
+      expect(fileSystemTree.root).toBe(FolderNode);
+      expect(fileSystemTree.root.type).toBe("folder");
+    });
+
+    it("required() returns a new TreePrimitive", () => {
+      const required = fileSystemTree.required();
+      expect(required).toBeInstanceOf(Primitive.TreePrimitive);
+      expect(required).not.toBe(fileSystemTree);
+    });
+
+    it("default() returns a new TreePrimitive with default value", () => {
+      const defaultState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      const withDefault = fileSystemTree.default(defaultState);
+      expect(withDefault._internal.getInitialState()).toEqual(defaultState);
+    });
+  });
+
+  describe("proxy - basic operations", () => {
+    it("get() returns empty array for initial state", () => {
+      const { env } = createEnvWithState();
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.get()).toEqual([]);
+    });
+
+    it("set() generates tree.set operation", () => {
+      const { env, operations } = createEnvWithState();
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const nodes: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      proxy.set(nodes);
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("tree.set");
+      expect(operations[0]!.payload).toEqual(nodes);
+    });
+
+    it("root() returns the root node", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "child1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const root = proxy.root();
+      expect(root).toBeDefined();
+      expect(root!.id).toBe("root");
+      expect(root!.parentId).toBe(null);
+    });
+
+    it("node() returns a node proxy by ID", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "child1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const node = proxy.node("child1");
+      expect(node).toBeDefined();
+      expect(node!.id).toBe("child1");
+      expect(node!.type).toBe("file");
+      expect(node!.get().data).toEqual({ name: "File1", size: 100 });
+    });
+
+    it("children() returns ordered children", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "child2", type: "file", parentId: "root", pos: "a1", data: { name: "File2", size: 200 } },
+        { id: "child1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const children = proxy.children("root");
+      expect(children).toHaveLength(2);
+      expect(children[0]!.id).toBe("child1"); // a0 comes first
+      expect(children[1]!.id).toBe("child2"); // a1 comes second
+    });
+  });
+
+  describe("proxy - type narrowing with is() and as()", () => {
+    it("is() returns true for matching node type", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const fileProxy = proxy.node("file1");
+      expect(fileProxy!.is(FileNode)).toBe(true);
+      expect(fileProxy!.is(FolderNode)).toBe(false);
+
+      const folderProxy = proxy.node("root");
+      expect(folderProxy!.is(FolderNode)).toBe(true);
+      expect(folderProxy!.is(FileNode)).toBe(false);
+    });
+
+    it("as() returns typed proxy for correct type", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const fileProxy = proxy.node("file1")!.as(FileNode);
+      expect(fileProxy.id).toBe("file1");
+      expect(fileProxy.type).toBe("file");
+
+      // Type-safe data access
+      fileProxy.data.name.set("UpdatedName");
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+    });
+
+    it("as() throws for wrong type", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "file1", type: "file", parentId: null, pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const nodeProxy = proxy.node("file1");
+      expect(() => nodeProxy!.as(FolderNode)).toThrow(Primitive.ValidationError);
+    });
+  });
+
+  describe("proxy - insert operations with TreeNode types", () => {
+    it("insertFirst() creates node at beginning of children", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "existing", type: "file", parentId: "root", pos: "a1", data: { name: "Existing", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const newId = proxy.insertFirst("root", FileNode, { name: "First", size: 50 });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("tree.insert");
+      expect(newId).toBe("node-1");
+
+      const payload = operations[0]!.payload as { id: string; pos: string; type: string };
+      expect(payload.type).toBe("file");
+      expect(payload.pos < "a1").toBe(true); // Should be before existing
+    });
+
+    it("insertLast() creates node at end of children", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "existing", type: "file", parentId: "root", pos: "a0", data: { name: "Existing", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.insertLast("root", FileNode, { name: "Last", size: 50 });
+
+      const payload = operations[0]!.payload as { pos: string };
+      expect(payload.pos > "a0").toBe(true); // Should be after existing
+    });
+
+    it("insertFirst() with null parentId creates root node", () => {
+      const { env, operations } = createEnvWithState();
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.insertFirst(null, FolderNode, { name: "Root" });
+
+      expect(operations).toHaveLength(1);
+      const payload = operations[0]!.payload as { parentId: string | null; type: string };
+      expect(payload.parentId).toBe(null);
+      expect(payload.type).toBe("folder");
+    });
+  });
+
+  describe("proxy - validation", () => {
+    it("throws when inserting invalid child type", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      // Files cannot have children
+      expect(() => proxy.insertFirst("file1", FileNode, { name: "Child", size: 50 })).toThrow(
+        Primitive.ValidationError
+      );
+    });
+
+    it("throws when inserting non-root type at root level", () => {
+      const { env } = createEnvWithState();
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      expect(() => proxy.insertFirst(null, FileNode, { name: "File", size: 50 })).toThrow(
+        Primitive.ValidationError
+      );
+    });
+
+    it("throws when inserting second root", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      expect(() => proxy.insertFirst(null, FolderNode, { name: "SecondRoot" })).toThrow(
+        Primitive.ValidationError
+      );
+    });
+  });
+
+  describe("proxy - toSnapshot()", () => {
+    it("returns undefined for empty tree", () => {
+      const { env } = createEnvWithState();
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBeUndefined();
+    });
+
+    it("returns nested snapshot with spread data", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+        { id: "folder1", type: "folder", parentId: "root", pos: "a1", data: { name: "Subfolder" } },
+        { id: "file2", type: "file", parentId: "folder1", pos: "a0", data: { name: "File2", size: 200 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      const snapshot = proxy.toSnapshot();
+      expect(snapshot).toBeDefined();
+      expect(snapshot!.id).toBe("root");
+      expect(snapshot!.type).toBe("folder");
+      expect(snapshot!.name).toBe("Root"); // Data spread at node level
+      expect(snapshot!.children).toHaveLength(2);
+
+      const file1Snapshot = snapshot!.children[0]!;
+      expect(file1Snapshot.id).toBe("file1");
+      expect(file1Snapshot.name).toBe("File1");
+      expect(file1Snapshot.children).toEqual([]);
+
+      const folder1Snapshot = snapshot!.children[1]!;
+      expect(folder1Snapshot.id).toBe("folder1");
+      expect(folder1Snapshot.children).toHaveLength(1);
+      expect(folder1Snapshot.children[0]!.name).toBe("File2");
+    });
+  });
+
+  describe("proxy - at() with typed node", () => {
+    it("at() returns typed proxy for node data", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.at("file1", FileNode).name.set("UpdatedName");
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.path.toTokens()).toEqual(["file1", "name"]);
+      expect(operations[0]!.payload).toBe("UpdatedName");
+    });
+
+    it("at() throws when node type mismatch", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "file1", type: "file", parentId: null, pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      expect(() => proxy.at("file1", FolderNode)).toThrow(Primitive.ValidationError);
+    });
+  });
+
+  describe("proxy - move operations", () => {
+    it("move() changes parent and position", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "folder1", type: "folder", parentId: "root", pos: "a0", data: { name: "Folder1" } },
+        { id: "folder2", type: "folder", parentId: "root", pos: "a1", data: { name: "Folder2" } },
+        { id: "file1", type: "file", parentId: "folder1", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      // Move file1 to folder2
+      proxy.move("file1", "folder2", 0);
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("tree.move");
+      const payload = operations[0]!.payload as { id: string; parentId: string };
+      expect(payload.id).toBe("file1");
+      expect(payload.parentId).toBe("folder2");
+    });
+
+    it("throws when moving node to its descendant (cycle prevention)", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "folder1", type: "folder", parentId: "root", pos: "a0", data: { name: "Folder1" } },
+        { id: "folder2", type: "folder", parentId: "folder1", pos: "a0", data: { name: "Folder2" } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      expect(() => proxy.move("folder1", "folder2", 0)).toThrow(Primitive.ValidationError);
+    });
+  });
+
+  describe("applyOperation", () => {
+    it("tree.set replaces entire tree", () => {
+      const newNodes: Primitive.TreeState<typeof FolderNode> = [
+        { id: "new-root", type: "folder", parentId: null, pos: "a0", data: { name: "NewRoot" } },
+      ];
+      const operation: Operation.Operation<any, any, any> = {
+        kind: "tree.set",
+        path: OperationPath.make(""),
+        payload: newNodes,
+      };
+
+      const result = fileSystemTree._internal.applyOperation([], operation);
+      expect(result).toEqual(newNodes);
+    });
+
+    it("tree.insert adds a new node", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      const operation: Operation.Operation<any, any, any> = {
+        kind: "tree.insert",
+        path: OperationPath.make(""),
+        payload: {
+          id: "file1",
+          type: "file",
+          parentId: "root",
+          pos: "a0",
+          data: { name: "File1", size: 100 },
+        },
+      };
+
+      const result = fileSystemTree._internal.applyOperation(initialState, operation);
+      expect(result).toHaveLength(2);
+      expect(result[1]).toEqual({
+        id: "file1",
+        type: "file",
+        parentId: "root",
+        pos: "a0",
+        data: { name: "File1", size: 100 },
+      });
+    });
+
+    it("tree.remove removes node and descendants", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "folder1", type: "folder", parentId: "root", pos: "a0", data: { name: "Folder1" } },
+        { id: "file1", type: "file", parentId: "folder1", pos: "a0", data: { name: "File1", size: 100 } },
+        { id: "folder2", type: "folder", parentId: "root", pos: "a1", data: { name: "Folder2" } },
+      ];
+      const operation: Operation.Operation<any, any, any> = {
+        kind: "tree.remove",
+        path: OperationPath.make(""),
+        payload: { id: "folder1" },
+      };
+
+      const result = fileSystemTree._internal.applyOperation(initialState, operation);
+      expect(result).toHaveLength(2);
+      expect(result.map(n => n.id)).toEqual(["root", "folder2"]);
+    });
+
+    it("delegates node data operations", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const operation: Operation.Operation<any, any, any> = {
+        kind: "string.set",
+        path: OperationPath.make("file1/name"),
+        payload: "UpdatedName",
+      };
+
+      const result = fileSystemTree._internal.applyOperation(initialState, operation);
+      const updatedNode = result.find(n => n.id === "file1");
+      expect(updatedNode!.data).toEqual({ name: "UpdatedName", size: 100 });
+    });
+  });
+
+  describe("getInitialState", () => {
+    it("automatically creates a root node when no default is set", () => {
+      const initialState = fileSystemTree._internal.getInitialState();
+      expect(initialState).toBeDefined();
+      expect(initialState).toHaveLength(1);
+      expect(initialState![0]).toMatchObject({
+        type: "folder",
+        parentId: null,
+        data: {},
+      });
+      // Verify ID and pos are generated
+      expect(typeof initialState![0]!.id).toBe("string");
+      expect(typeof initialState![0]!.pos).toBe("string");
+    });
+
+    it("returns the default value when set", () => {
+      const defaultState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      const withDefault = fileSystemTree.default(defaultState);
+      expect(withDefault._internal.getInitialState()).toEqual(defaultState);
+    });
+  });
+});
+
+// =============================================================================
+// Integration Tests - Tree with Complex Structures
+// =============================================================================
+
+describe("Integration - Tree with Complex Structures", () => {
+  it("supports deeply nested file system", () => {
+    const FileNode = Primitive.TreeNode("file", {
+      data: Primitive.Struct({ name: Primitive.String(), content: Primitive.String() }),
+      children: [] as const,
+    });
+
+    const FolderNode: Primitive.AnyTreeNodePrimitive = Primitive.TreeNode("folder", {
+      data: Primitive.Struct({ name: Primitive.String() }),
+      children: (): readonly Primitive.AnyTreeNodePrimitive[] => [FolderNode, FileNode],
+    });
+
+    const fileSystemTree = Primitive.Tree({ root: FolderNode });
+
+    const operations: Operation.Operation<any, any, any>[] = [];
+    let currentState: Primitive.TreeState<typeof FolderNode> = [];
+    let idCounter = 0;
+
+    const env = ProxyEnvironment.make({
+      onOperation: (op) => {
+        operations.push(op);
+        currentState = fileSystemTree._internal.applyOperation(currentState, op);
+      },
+      getState: () => currentState,
+      generateId: () => `node-${++idCounter}`,
+    });
+
+    const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+    // Create root folder
+    const rootId = proxy.insertFirst(null, FolderNode, { name: "root" });
+
+    // Create nested structure
+    const docsId = proxy.insertLast(rootId, FolderNode, { name: "docs" });
+    const srcId = proxy.insertLast(rootId, FolderNode, { name: "src" });
+
+    proxy.insertLast(docsId, FileNode, { name: "README.md", content: "# Hello" });
+    proxy.insertLast(srcId, FolderNode, { name: "components" });
+
+    expect(currentState).toHaveLength(5);
+
+    // Verify structure via snapshot
+    const snapshot = proxy.toSnapshot();
+    expect(snapshot).toBeDefined();
+    expect(snapshot!.name).toBe("root");
+    expect(snapshot!.children).toHaveLength(2);
+  });
+
+  it("maintains order when inserting multiple siblings", () => {
+    const NodeType: Primitive.AnyTreeNodePrimitive = Primitive.TreeNode("node", {
+      data: Primitive.Struct({ label: Primitive.String() }),
+      children: (): readonly Primitive.AnyTreeNodePrimitive[] => [NodeType],
+    });
+
+    const tree = Primitive.Tree({ root: NodeType });
+
+    const operations: Operation.Operation<any, any, any>[] = [];
+    let currentState: Primitive.TreeState<typeof NodeType> = [];
+    let idCounter = 0;
+
+    const env = ProxyEnvironment.make({
+      onOperation: (op) => {
+        operations.push(op);
+        currentState = tree._internal.applyOperation(currentState, op);
+      },
+      getState: () => currentState,
+      generateId: () => `node-${++idCounter}`,
+    });
+
+    const proxy = tree._internal.createProxy(env, OperationPath.make(""));
+
+    // Create root and multiple children
+    const rootId = proxy.insertFirst(null, NodeType, { label: "root" });
+    proxy.insertLast(rootId, NodeType, { label: "A" });
+    proxy.insertLast(rootId, NodeType, { label: "B" });
+    proxy.insertLast(rootId, NodeType, { label: "C" });
+
+    // Insert between A and B
+    const children = proxy.children(rootId);
+    expect(children.map(c => (c.data as { label: string }).label)).toEqual(["A", "B", "C"]);
+
+    // Insert D after A
+    proxy.insertAfter(children[0]!.id, NodeType, { label: "D" });
+
+    const updatedChildren = proxy.children(rootId);
+    expect(updatedChildren.map(c => (c.data as { label: string }).label)).toEqual(["A", "D", "B", "C"]);
+  });
+});
+
+// =============================================================================
+// toSnapshot Tests
+// =============================================================================
+
+describe("toSnapshot", () => {
+  describe("StringPrimitive", () => {
+    it("returns the state value when defined", () => {
+      const state: Record<string, unknown> = { name: "test" };
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: (path) => {
+          const tokens = path.toTokens().filter(t => t !== "");
+          if (tokens.length === 0) return state;
+          return state[tokens[0]!];
+        },
+      });
+
+      const stringPrimitive = Primitive.String();
+      const proxy = stringPrimitive._internal.createProxy(env, OperationPath.make("name"));
+
+      expect(proxy.toSnapshot()).toBe("test");
+    });
+
+    it("returns undefined when state is undefined and no default", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const stringPrimitive = Primitive.String();
+      const proxy = stringPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBeUndefined();
+    });
+
+    it("returns default value when state is undefined", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const stringPrimitive = Primitive.String().default("default value");
+      const proxy = stringPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBe("default value");
+    });
+
+    it("returns state value over default when both exist", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => "actual value",
+      });
+
+      const stringPrimitive = Primitive.String().default("default value");
+      const proxy = stringPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBe("actual value");
+    });
+  });
+
+  describe("NumberPrimitive", () => {
+    it("returns default value when state is undefined", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const numberPrimitive = Primitive.Number().default(42);
+      const proxy = numberPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBe(42);
+    });
+
+    it("returns 0 as default (falsy default value)", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const numberPrimitive = Primitive.Number().default(0);
+      const proxy = numberPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBe(0);
+    });
+  });
+
+  describe("BooleanPrimitive", () => {
+    it("returns default value when state is undefined", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const booleanPrimitive = Primitive.Boolean().default(true);
+      const proxy = booleanPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBe(true);
+    });
+
+    it("returns false as default (falsy default value)", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const booleanPrimitive = Primitive.Boolean().default(false);
+      const proxy = booleanPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBe(false);
+    });
+  });
+
+  describe("StructPrimitive", () => {
+    it("returns snapshot with all field snapshots", () => {
+      const state = {
+        name: "John",
+        age: 30,
+      };
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: (path) => {
+          const tokens = path.toTokens().filter(t => t !== "");
+          if (tokens.length === 0) return state;
+          let current: unknown = state;
+          for (const token of tokens) {
+            current = (current as Record<string, unknown>)[token];
+          }
+          return current;
+        },
+      });
+
+      const schema = Primitive.Struct({
+        name: Primitive.String(),
+        age: Primitive.Number(),
+      });
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      const snapshot = proxy.toSnapshot();
+
+      expect(snapshot).toEqual({
+        name: "John",
+        age: 30,
+      });
+    });
+
+    it("respects field defaults in snapshot", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const schema = Primitive.Struct({
+        name: Primitive.String().default("Unknown"),
+        count: Primitive.Number().default(0),
+      });
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      const snapshot = proxy.toSnapshot();
+
+      expect(snapshot).toEqual({
+        name: "Unknown",
+        count: 0,
+      });
+    });
+
+    it("returns undefined for struct without state or default", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const schema = Primitive.Struct({
+        name: Primitive.String(),
+        age: Primitive.Number(),
+      });
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBeUndefined();
+    });
+  });
+
+  describe("ArrayPrimitive", () => {
+    it("returns empty array when state is undefined", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const schema = Primitive.Array(Primitive.String());
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toEqual([]);
+    });
+
+    it("returns array entries with id and value snapshot", () => {
+      const state = [
+        { id: "1", pos: "a", value: "first" },
+        { id: "2", pos: "b", value: "second" },
+      ];
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: (path) => {
+          const tokens = path.toTokens().filter(t => t !== "");
+          if (tokens.length === 0) return state;
+          // For element access by ID
+          if (tokens.length >= 1) {
+            const entry = state.find(e => e.id === tokens[0]);
+            return entry?.value;
+          }
+          return undefined;
+        },
+      });
+
+      const schema = Primitive.Array(Primitive.String());
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      const snapshot = proxy.toSnapshot();
+
+      expect(snapshot).toEqual([
+        { id: "1", value: "first" },
+        { id: "2", value: "second" },
+      ]);
+    });
+
+    it("returns element snapshots with defaults applied", () => {
+      const state = [
+        { id: "1", pos: "a", value: undefined },
+      ];
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: (path) => {
+          const tokens = path.toTokens().filter(t => t !== "");
+          if (tokens.length === 0) return state;
+          if (tokens.length >= 1) {
+            const entry = state.find(e => e.id === tokens[0]);
+            return entry?.value;
+          }
+          return undefined;
+        },
+      });
+
+      const schema = Primitive.Array(Primitive.String().default("default"));
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      const snapshot = proxy.toSnapshot();
+
+      expect(snapshot).toEqual([
+        { id: "1", value: "default" },
+      ]);
+    });
+
+    it("handles nested struct elements", () => {
+      const state = [
+        { id: "1", pos: "a", value: { title: "First", count: 10 } },
+        { id: "2", pos: "b", value: { title: "Second", count: 20 } },
+      ];
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: (path) => {
+          const tokens = path.toTokens().filter(t => t !== "");
+          if (tokens.length === 0) return state;
+          if (tokens.length >= 1) {
+            const entry = state.find(e => e.id === tokens[0]);
+            if (!entry) return undefined;
+            if (tokens.length === 1) return entry.value;
+            let current: unknown = entry.value;
+            for (let i = 1; i < tokens.length; i++) {
+              current = (current as Record<string, unknown>)[tokens[i]!];
+            }
+            return current;
+          }
+          return undefined;
+        },
+      });
+
+      const schema = Primitive.Array(
+        Primitive.Struct({
+          title: Primitive.String(),
+          count: Primitive.Number(),
+        })
+      );
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      const snapshot = proxy.toSnapshot();
+
+      expect(snapshot).toEqual([
+        { id: "1", value: { title: "First", count: 10 } },
+        { id: "2", value: { title: "Second", count: 20 } },
+      ]);
+    });
+  });
+
+  describe("UnionPrimitive", () => {
+    it("returns snapshot of active variant", () => {
+      const state = { type: "person", name: "John" };
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: (path) => {
+          const tokens = path.toTokens().filter(t => t !== "");
+          if (tokens.length === 0) return state;
+          let current: unknown = state;
+          for (const token of tokens) {
+            current = (current as Record<string, unknown>)[token];
+          }
+          return current;
+        },
+      });
+
+      const schema = Primitive.Union({
+        variants: {
+          person: Primitive.Struct({
+            type: Primitive.Literal("person"),
+            name: Primitive.String(),
+          }),
+          company: Primitive.Struct({
+            type: Primitive.Literal("company"),
+            companyName: Primitive.String(),
+          }),
+        },
+      });
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      const snapshot = proxy.toSnapshot();
+
+      expect(snapshot).toEqual({ type: "person", name: "John" });
+    });
+
+    it("returns undefined when no state and no default", () => {
+      const env = ProxyEnvironment.make({
+        onOperation: () => {},
+        getState: () => undefined,
+      });
+
+      const schema = Primitive.Union({
+        variants: {
+          person: Primitive.Struct({
+            type: Primitive.Literal("person"),
+            name: Primitive.String(),
+          }),
+        },
+      });
+      const proxy = schema._internal.createProxy(env, OperationPath.make(""));
+
+      expect(proxy.toSnapshot()).toBeUndefined();
+    });
+  });
+
+  describe("Type inference (compile-time checks)", () => {
+    it("TDefined=true means no undefined in type", () => {
+      // This test verifies that the types work correctly at compile time
+      const requiredString = Primitive.String().required();
+      const defaultString = Primitive.String().default("test");
+      const optionalString = Primitive.String();
+
+      // Type checks - these should compile without errors
+      const _check1: Primitive.InferSnapshot<typeof requiredString> = "hello";
+      const _check2: Primitive.InferSnapshot<typeof defaultString> = "hello";
+      // @ts-expect-error - optionalString can be undefined
+      const _check3: string = undefined as Primitive.InferSnapshot<typeof optionalString>;
+
+      // Runtime check just to ensure the test runs
+      expect(true).toBe(true);
+    });
+
+    it("struct snapshot includes field snapshots", () => {
+      const schema = Primitive.Struct({
+        name: Primitive.String().required(),
+        age: Primitive.Number().default(0),
+        nickname: Primitive.String(),
+      }).required();
+
+      // Type checks
+      type Snapshot = Primitive.InferSnapshot<typeof schema>;
+      const _check: Snapshot = {
+        name: "John",
+        age: 30,
+        nickname: undefined,
+      };
+
+      expect(true).toBe(true);
+    });
+
+    it("array snapshot is always an array", () => {
+      const schema = Primitive.Array(Primitive.String());
+
+      // Type check - arrays always return an array, never undefined
+      type Snapshot = Primitive.InferSnapshot<typeof schema>;
+      const _check: Snapshot = [];
+
+      expect(true).toBe(true);
+    });
+  });
+});

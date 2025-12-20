@@ -490,4 +490,67 @@ describe("Document", () => {
       });
     });
   });
+
+  describe("toSnapshot", () => {
+    it("returns snapshot of document state", () => {
+      const schema = Primitive.Struct({
+        name: Primitive.String(),
+        age: Primitive.Number(),
+      });
+
+      const doc = Document.make(schema, {
+        initial: { name: "Alice", age: 30 },
+      });
+
+      const snapshot = doc.toSnapshot();
+
+      expect(snapshot).toEqual({ name: "Alice", age: 30 });
+    });
+
+    it("respects field defaults in snapshot", () => {
+      const schema = Primitive.Struct({
+        name: Primitive.String().default("Unknown"),
+        count: Primitive.Number().default(0),
+      });
+
+      const doc = Document.make(schema);
+
+      const snapshot = doc.toSnapshot();
+
+      expect(snapshot).toEqual({ name: "Unknown", count: 0 });
+    });
+
+    it("reflects state changes in snapshot", () => {
+      const schema = Primitive.Struct({
+        name: Primitive.String(),
+      });
+
+      const doc = Document.make(schema, {
+        initial: { name: "Alice" },
+      });
+
+      expect(doc.toSnapshot()).toEqual({ name: "Alice" });
+
+      doc.root.name.set("Bob");
+
+      expect(doc.toSnapshot()).toEqual({ name: "Bob" });
+    });
+
+    it("handles arrays in snapshot", () => {
+      const schema = Primitive.Struct({
+        items: Primitive.Array(Primitive.String()),
+      });
+
+      const doc = Document.make(schema);
+
+      doc.root.items.push("first");
+      doc.root.items.push("second");
+
+      const snapshot = doc.toSnapshot();
+
+      expect(snapshot?.items).toHaveLength(2);
+      expect(snapshot?.items[0]?.value).toBe("first");
+      expect(snapshot?.items[1]?.value).toBe("second");
+    });
+  });
 });
