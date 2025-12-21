@@ -63,7 +63,6 @@ jobs:
       - name: Publish to npm
         run: |
           # Publish all workspace packages
-          npm publish --workspace=packages/mimic --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
-          npm publish --workspace=packages/mimic-effect --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
+          bun publish --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
