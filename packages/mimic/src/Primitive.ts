@@ -26,6 +26,9 @@ export * from "./primitives/Lazy";
 // Union Primitive
 export * from "./primitives/Union";
 
+// Either Primitive
+export * from "./primitives/Either";
+
 // TreeNode Primitive
 export * from "./primitives/TreeNode";
 // Tree Primitive
