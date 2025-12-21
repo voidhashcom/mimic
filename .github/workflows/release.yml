@@ -66,8 +66,8 @@ jobs:
       - name: Publish to npm
         run: |
           # Publish all workspace packages
-          pnpm publish --filter=@voidhash/mimic --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
-          pnpm publish --filter=@voidhash/mimic-effect --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
-          pnpm publish --filter=@voidhash/mimic-react --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
+          pnpm publish --filter=@voidhash/mimic --access public --no-git-checks --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
+          pnpm publish --filter=@voidhash/mimic-effect --access public --no-git-checks --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
+          pnpm publish --filter=@voidhash/mimic-react --access public --no-git-checks --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
