@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
-import { Primitive } from "@voidhash/mimic";
+import * as Schema from "effect/Schema";
+import { Primitive, Presence } from "@voidhash/mimic";
 import * as MimicConfig from "../src/MimicConfig";
 
 // =============================================================================
@@ -108,6 +109,67 @@ describe("MimicConfig", () => {
       expect(MimicConfig.MimicServerConfigTag.key).toBe(
         "@voidhash/mimic-server-effect/MimicServerConfig"
       );
+    });
+  });
+
+  describe("presence configuration", () => {
+    const CursorPresence = Presence.make({
+      schema: Schema.Struct({
+        x: Schema.Number,
+        y: Schema.Number,
+        name: Schema.optional(Schema.String),
+      }),
+    });
+
+    it("should have undefined presence by default", () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+      });
+
+      expect(config.presence).toBeUndefined();
+    });
+
+    it("should accept presence schema option", () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+        presence: CursorPresence,
+      });
+
+      expect(config.presence).toBe(CursorPresence);
+    });
+
+    it("should provide presence through layer", async () => {
+      const testLayer = MimicConfig.layer({
+        schema: TestSchema,
+        presence: CursorPresence,
+      });
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const config = yield* MimicConfig.MimicServerConfigTag;
+          return config.presence;
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(result).toBe(CursorPresence);
+    });
+
+    it("should work with all options including presence", () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+        maxIdleTime: "10 minutes",
+        maxTransactionHistory: 500,
+        heartbeatInterval: "1 minute",
+        heartbeatTimeout: "20 seconds",
+        presence: CursorPresence,
+      });
+
+      expect(config.schema).toBe(TestSchema);
+      expect(Duration.toMillis(config.maxIdleTime)).toBe(10 * 60 * 1000);
+      expect(config.maxTransactionHistory).toBe(500);
+      expect(Duration.toMillis(config.heartbeatInterval)).toBe(60 * 1000);
+      expect(Duration.toMillis(config.heartbeatTimeout)).toBe(20 * 1000);
+      expect(config.presence).toBe(CursorPresence);
     });
   });
 });

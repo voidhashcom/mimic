@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import * as Schema from "effect/Schema";
 import * as Primitive from "../../src/Primitive";
 import * as Transaction from "../../src/Transaction";
 import * as OperationPath from "../../src/OperationPath";
@@ -6,6 +7,7 @@ import * as ClientDocument from "../../src/client/ClientDocument";
 import type * as Transport from "../../src/client/Transport";
 import * as Rebase from "../../src/client/Rebase";
 import * as StateMonitor from "../../src/client/StateMonitor";
+import * as Presence from "../../src/Presence";
 
 // =============================================================================
 // Mock Transport
@@ -17,6 +19,9 @@ interface MockTransport extends Transport.Transport {
   simulateServerMessage: (message: Transport.ServerMessage) => void;
   snapshotRequested: boolean;
   autoSendSnapshot?: { state: unknown; version: number };
+  // Presence tracking
+  presenceSetCalls: unknown[];
+  presenceClearCalls: number;
 }
 
 const createMockTransport = (options?: {
@@ -26,12 +31,16 @@ const createMockTransport = (options?: {
   const sentTransactions: Transaction.Transaction[] = [];
   let _connected = false;
   let snapshotRequested = false;
+  const presenceSetCalls: unknown[] = [];
+  let presenceClearCalls = 0;
 
   const transport: MockTransport = {
     sentTransactions,
     handlers,
     snapshotRequested,
     autoSendSnapshot: options?.autoSendSnapshot,
+    get presenceSetCalls() { return presenceSetCalls; },
+    get presenceClearCalls() { return presenceClearCalls; },
 
     send: (transaction) => {
       sentTransactions.push(transaction);
@@ -66,6 +75,14 @@ const createMockTransport = (options?: {
     },
 
     isConnected: () => _connected,
+
+    sendPresenceSet: (data: unknown) => {
+      presenceSetCalls.push(data);
+    },
+
+    sendPresenceClear: () => {
+      presenceClearCalls++;
+    },
 
     simulateServerMessage: (message) => {
       for (const handler of handlers) {
@@ -738,6 +755,644 @@ describe("StateMonitor", () => {
       expect(monitor.getStatus().pendingCount).toBe(0);
       expect(monitor.getStatus().expectedVersion).toBe(10);
       expect(recoveryCompleted).toBe(true);
+    });
+  });
+});
+
+// =============================================================================
+// ClientDocument Presence Tests
+// =============================================================================
+
+const CursorPresenceSchema = Presence.make({
+  schema: Schema.Struct({
+    x: Schema.Number,
+    y: Schema.Number,
+    name: Schema.optional(Schema.String),
+  }),
+});
+
+describe("ClientDocument Presence", () => {
+  let transport: ReturnType<typeof createMockTransport>;
+
+  beforeEach(() => {
+    transport = createMockTransport();
+  });
+
+  describe("presence API availability", () => {
+    it("should have undefined presence when no presence schema provided", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+      });
+
+      await client.connect();
+
+      expect(client.presence).toBeUndefined();
+    });
+
+    it("should have defined presence when presence schema provided", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      expect(client.presence).toBeDefined();
+      expect(typeof client.presence!.selfId).toBe("function");
+      expect(typeof client.presence!.self).toBe("function");
+      expect(typeof client.presence!.others).toBe("function");
+      expect(typeof client.presence!.all).toBe("function");
+      expect(typeof client.presence!.set).toBe("function");
+      expect(typeof client.presence!.clear).toBe("function");
+      expect(typeof client.presence!.subscribe).toBe("function");
+    });
+  });
+
+  describe("selfId", () => {
+    it("should return undefined before presence_snapshot received", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      expect(client.presence!.selfId()).toBeUndefined();
+    });
+
+    it("should return correct id after presence_snapshot received", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-my-id",
+        presences: {},
+      });
+
+      expect(client.presence!.selfId()).toBe("conn-my-id");
+    });
+  });
+
+  describe("self", () => {
+    it("should return undefined before set is called", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      expect(client.presence!.self()).toBeUndefined();
+    });
+
+    it("should return data after set is called", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      client.presence!.set({ x: 100, y: 200 });
+
+      expect(client.presence!.self()).toEqual({ x: 100, y: 200 });
+    });
+  });
+
+  describe("others", () => {
+    it("should return empty map initially", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      expect(client.presence!.others().size).toBe(0);
+    });
+
+    it("should return other presences from snapshot", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-me",
+        presences: {
+          "conn-other-1": { data: { x: 10, y: 20 }, userId: "user-1" },
+          "conn-other-2": { data: { x: 30, y: 40 } },
+        },
+      });
+
+      const others = client.presence!.others();
+      expect(others.size).toBe(2);
+      expect(others.get("conn-other-1")).toEqual({ data: { x: 10, y: 20 }, userId: "user-1" });
+      expect(others.get("conn-other-2")).toEqual({ data: { x: 30, y: 40 } });
+    });
+
+    it("should update on presence_update", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-me",
+        presences: {},
+      });
+
+      transport.simulateServerMessage({
+        type: "presence_update",
+        id: "conn-new-user",
+        data: { x: 50, y: 60 },
+        userId: "user-new",
+      });
+
+      const others = client.presence!.others();
+      expect(others.size).toBe(1);
+      expect(others.get("conn-new-user")).toEqual({ data: { x: 50, y: 60 }, userId: "user-new" });
+    });
+
+    it("should remove on presence_remove", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-me",
+        presences: {
+          "conn-leaving": { data: { x: 10, y: 20 } },
+        },
+      });
+
+      expect(client.presence!.others().size).toBe(1);
+
+      transport.simulateServerMessage({
+        type: "presence_remove",
+        id: "conn-leaving",
+      });
+
+      expect(client.presence!.others().size).toBe(0);
+    });
+  });
+
+  describe("all", () => {
+    it("should combine self and others", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-me",
+        presences: {
+          "conn-other": { data: { x: 10, y: 20 } },
+        },
+      });
+
+      client.presence!.set({ x: 100, y: 200 });
+
+      const all = client.presence!.all();
+      expect(all.size).toBe(2);
+      expect(all.get("conn-me")).toEqual({ data: { x: 100, y: 200 } });
+      expect(all.get("conn-other")).toEqual({ data: { x: 10, y: 20 } });
+    });
+
+    it("should not include self if self data not set", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-me",
+        presences: {
+          "conn-other": { data: { x: 10, y: 20 } },
+        },
+      });
+
+      const all = client.presence!.all();
+      expect(all.size).toBe(1);
+      expect(all.has("conn-me")).toBe(false);
+      expect(all.get("conn-other")).toEqual({ data: { x: 10, y: 20 } });
+    });
+  });
+
+  describe("initialPresence", () => {
+    it("should set presence to initialPresence value on connect", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+        initialPresence: { x: 50, y: 100, name: "Initial User" },
+      });
+
+      await client.connect();
+
+      expect(client.presence!.self()).toEqual({ x: 50, y: 100, name: "Initial User" });
+    });
+
+    it("should send initialPresence to transport on connect", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+        initialPresence: { x: 25, y: 75 },
+      });
+
+      await client.connect();
+
+      expect(transport.presenceSetCalls.length).toBe(1);
+      expect(transport.presenceSetCalls[0]).toEqual({ x: 25, y: 75 });
+    });
+
+    it("should notify subscribers when initialPresence is set", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+        initialPresence: { x: 10, y: 20 },
+      });
+
+      let changeCount = 0;
+      client.presence!.subscribe({
+        onPresenceChange: () => {
+          changeCount++;
+        },
+      });
+
+      await client.connect();
+
+      expect(changeCount).toBe(1);
+    });
+
+    it("should not set presence when initialPresence is not provided", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      expect(client.presence!.self()).toBeUndefined();
+      expect(transport.presenceSetCalls.length).toBe(0);
+    });
+  });
+
+  describe("set", () => {
+    it("should validate data against schema", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      // Valid data should not throw
+      expect(() => {
+        client.presence!.set({ x: 100, y: 200 });
+      }).not.toThrow();
+
+      // Invalid data should throw
+      expect(() => {
+        client.presence!.set({ x: "invalid", y: 200 } as any);
+      }).toThrow();
+    });
+
+    it("should send presence data to transport", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      client.presence!.set({ x: 100, y: 200, name: "Alice" });
+
+      expect(transport.presenceSetCalls.length).toBe(1);
+      expect(transport.presenceSetCalls[0]).toEqual({ x: 100, y: 200, name: "Alice" });
+    });
+
+    it("should update local self state", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      expect(client.presence!.self()).toBeUndefined();
+
+      client.presence!.set({ x: 50, y: 75 });
+
+      expect(client.presence!.self()).toEqual({ x: 50, y: 75 });
+    });
+  });
+
+  describe("clear", () => {
+    it("should send presence_clear to transport", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      client.presence!.clear();
+
+      expect(transport.presenceClearCalls).toBe(1);
+    });
+
+    it("should clear local self state", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      client.presence!.set({ x: 100, y: 200 });
+      expect(client.presence!.self()).toEqual({ x: 100, y: 200 });
+
+      client.presence!.clear();
+      expect(client.presence!.self()).toBeUndefined();
+    });
+  });
+
+  describe("subscribe", () => {
+    it("should notify on presence_snapshot", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      let changeCount = 0;
+      client.presence!.subscribe({
+        onPresenceChange: () => {
+          changeCount++;
+        },
+      });
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-me",
+        presences: {},
+      });
+
+      expect(changeCount).toBe(1);
+    });
+
+    it("should notify on presence_update", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      let changeCount = 0;
+      client.presence!.subscribe({
+        onPresenceChange: () => {
+          changeCount++;
+        },
+      });
+
+      transport.simulateServerMessage({
+        type: "presence_update",
+        id: "conn-other",
+        data: { x: 10, y: 20 },
+      });
+
+      expect(changeCount).toBe(1);
+    });
+
+    it("should notify on presence_remove", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      let changeCount = 0;
+      client.presence!.subscribe({
+        onPresenceChange: () => {
+          changeCount++;
+        },
+      });
+
+      transport.simulateServerMessage({
+        type: "presence_remove",
+        id: "conn-other",
+      });
+
+      expect(changeCount).toBe(1);
+    });
+
+    it("should notify on local set", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      let changeCount = 0;
+      client.presence!.subscribe({
+        onPresenceChange: () => {
+          changeCount++;
+        },
+      });
+
+      client.presence!.set({ x: 100, y: 200 });
+
+      expect(changeCount).toBe(1);
+    });
+
+    it("should notify on local clear", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      let changeCount = 0;
+      client.presence!.subscribe({
+        onPresenceChange: () => {
+          changeCount++;
+        },
+      });
+
+      client.presence!.clear();
+
+      expect(changeCount).toBe(1);
+    });
+
+    it("should allow unsubscribing", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      let changeCount = 0;
+      const unsubscribe = client.presence!.subscribe({
+        onPresenceChange: () => {
+          changeCount++;
+        },
+      });
+
+      client.presence!.set({ x: 100, y: 200 });
+      expect(changeCount).toBe(1);
+
+      unsubscribe();
+
+      client.presence!.set({ x: 200, y: 300 });
+      expect(changeCount).toBe(1); // Should not increment
+    });
+  });
+
+  describe("disconnect behavior", () => {
+    it("should clear presence state on disconnect", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-me",
+        presences: {
+          "conn-other": { data: { x: 10, y: 20 } },
+        },
+      });
+
+      client.presence!.set({ x: 100, y: 200 });
+
+      expect(client.presence!.selfId()).toBe("conn-me");
+      expect(client.presence!.self()).toEqual({ x: 100, y: 200 });
+      expect(client.presence!.others().size).toBe(1);
+
+      client.disconnect();
+
+      expect(client.presence!.selfId()).toBeUndefined();
+      expect(client.presence!.self()).toBeUndefined();
+      expect(client.presence!.others().size).toBe(0);
+    });
+
+    it("should notify subscribers on disconnect", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+        presence: CursorPresenceSchema,
+      });
+
+      await client.connect();
+
+      transport.simulateServerMessage({
+        type: "presence_snapshot",
+        selfId: "conn-me",
+        presences: {
+          "conn-other": { data: { x: 10, y: 20 } },
+        },
+      });
+
+      let changeCount = 0;
+      client.presence!.subscribe({
+        onPresenceChange: () => {
+          changeCount++;
+        },
+      });
+
+      // Reset count after snapshot notification
+      changeCount = 0;
+
+      client.disconnect();
+
+      // Should notify when clearing presence
+      expect(changeCount).toBe(1);
     });
   });
 });

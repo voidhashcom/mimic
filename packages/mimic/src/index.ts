@@ -9,3 +9,4 @@ export * as Operation from "./Operation.js";
 export * as OperationPath from "./OperationPath.js";
 export * as ProxyEnvironment from "./ProxyEnvironment.js";
 export * as Transform from "./Transform.js";
+export * as Presence from "./Presence.js";

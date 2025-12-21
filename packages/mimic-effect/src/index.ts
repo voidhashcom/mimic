@@ -37,6 +37,7 @@ export * as MimicConfig from "./MimicConfig.js";
 // =============================================================================
 
 export * as DocumentManager from "./DocumentManager.js";
+export * as PresenceManager from "./PresenceManager.js";
 export * as WebSocketHandler from "./WebSocketHandler.js";
 export * as DocumentProtocol from "./DocumentProtocol.js";
 

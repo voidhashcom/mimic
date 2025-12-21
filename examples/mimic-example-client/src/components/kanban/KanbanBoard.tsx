@@ -184,9 +184,31 @@ export function KanbanBoard() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-row items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Kanban Board</h1>
-        <pre>{JSON.stringify({isConnected: mimic.isConnected, isReady: mimic.isReady}, null, 2)}</pre>
+        <div className='flex flex-row items-center gap-2'>
+          <div className='flex flex-row items-center gap-2'>
+            <div>
+            {
+              mimic.isConnected ? "Connected" : "Disconnected"
+            }
+            </div>
+            <div>
+            {
+              mimic.isReady ? "Ready" : "Not Ready"
+            }
+            </div>
+          </div>
+          <div className='flex flex-row items-center -gap-2'>
+          {
+            Array.from(mimic.presence?.all.entries() ?? []).map(([id, entry]) => (
+              <div key={id} className='w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center text-gray-900 dark:text-gray-100'>
+                {entry.data.name?.slice(0, 1)}
+              </div>
+            ))
+          } 
+          </div>
+        </div>
       </div>
 
       <DndContext

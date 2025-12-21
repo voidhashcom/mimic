@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { Primitive } from "@voidhash/mimic";
+import * as Schema from "effect/Schema";
+import { Primitive, Presence } from "@voidhash/mimic";
 import * as MimicServer from "../src/MimicServer";
 import * as MimicAuthService from "../src/MimicAuthService";
 import * as InMemoryDataStorage from "../src/storage/InMemoryDataStorage";
@@ -216,6 +217,169 @@ describe("MimicServer", () => {
       expect(options.schema).toBe(TestSchema);
       expect(options.basePath).toBeUndefined();
       expect(options.maxTransactionHistory).toBeUndefined();
+    });
+  });
+
+  describe("presence support", () => {
+    const CursorPresence = Presence.make({
+      schema: Schema.Struct({
+        x: Schema.Number,
+        y: Schema.Number,
+        name: Schema.optional(Schema.String),
+      }),
+    });
+
+    describe("layer", () => {
+      it("should accept presence option", async () => {
+        const testLayer = MimicServer.layer({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          presence: CursorPresence,
+        });
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const handler = yield* MimicServer.MimicWebSocketHandler;
+            return typeof handler === "function";
+          }).pipe(Effect.provide(testLayer))
+        );
+
+        expect(result).toBe(true);
+      });
+
+      it("should work with presence and custom auth", async () => {
+        const customAuthLayer = MimicAuthService.layer({
+          authHandler: (token) => ({ success: true, userId: token }),
+        });
+
+        const testLayer = MimicServer.layer({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          presence: CursorPresence,
+        }).pipe(Layer.provideMerge(customAuthLayer));
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const handler = yield* MimicServer.MimicWebSocketHandler;
+            return typeof handler === "function";
+          }).pipe(Effect.provide(testLayer))
+        );
+
+        expect(result).toBe(true);
+      });
+
+      it("should work with presence and maxTransactionHistory", async () => {
+        const testLayer = MimicServer.layer({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          presence: CursorPresence,
+          maxTransactionHistory: 500,
+        });
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const handler = yield* MimicServer.MimicWebSocketHandler;
+            return typeof handler === "function";
+          }).pipe(Effect.provide(testLayer))
+        );
+
+        expect(result).toBe(true);
+      });
+    });
+
+    describe("handlerLayer", () => {
+      it("should accept presence option", async () => {
+        const testLayer = MimicServer.handlerLayer({
+          schema: TestSchema,
+          presence: CursorPresence,
+        });
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const handler = yield* MimicServer.MimicWebSocketHandler;
+            return typeof handler === "function";
+          }).pipe(Effect.provide(testLayer))
+        );
+
+        expect(result).toBe(true);
+      });
+    });
+
+    describe("documentManagerLayer", () => {
+      it("should accept presence option", async () => {
+        const testLayer = MimicServer.documentManagerLayer({
+          schema: TestSchema,
+          presence: CursorPresence,
+        });
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            return true;
+          }).pipe(Effect.provide(testLayer))
+        );
+
+        expect(result).toBe(true);
+      });
+    });
+
+    describe("layerHttpLayerRouter", () => {
+      it("should accept presence option", () => {
+        const routeLayer = MimicServer.layerHttpLayerRouter({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          presence: CursorPresence,
+        });
+
+        expect(routeLayer).toBeDefined();
+      });
+
+      it("should work with presence and custom authLayer", () => {
+        const customAuthLayer = MimicAuthService.layer({
+          authHandler: (token) => ({ success: true, userId: token }),
+        });
+
+        const routeLayer = MimicServer.layerHttpLayerRouter({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          presence: CursorPresence,
+          authLayer: customAuthLayer,
+        });
+
+        expect(routeLayer).toBeDefined();
+      });
+
+      it("should work with presence and all options", () => {
+        const customAuthLayer = MimicAuthService.layer({
+          authHandler: (token) => ({ success: true, userId: token }),
+        });
+
+        const routeLayer = MimicServer.layerHttpLayerRouter({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          presence: CursorPresence,
+          maxTransactionHistory: 500,
+          authLayer: customAuthLayer,
+          storageLayer: InMemoryDataStorage.layer,
+        });
+
+        expect(routeLayer).toBeDefined();
+      });
+    });
+
+    describe("MimicLayerOptions with presence", () => {
+      it("should accept presence in options", () => {
+        const options: MimicServer.MimicLayerOptions<typeof TestSchema> = {
+          schema: TestSchema,
+          basePath: "/custom/path",
+          maxTransactionHistory: 1000,
+          presence: CursorPresence,
+        };
+
+        expect(options.schema).toBe(TestSchema);
+        expect(options.basePath).toBe("/custom/path");
+        expect(options.maxTransactionHistory).toBe(1000);
+        expect(options.presence).toBe(CursorPresence);
+      });
     });
   });
 });

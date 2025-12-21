@@ -48,6 +48,53 @@ export interface AuthResultMessage {
   readonly error?: string;
 }
 
+// =============================================================================
+// Presence Server Messages
+// =============================================================================
+
+/**
+ * A presence entry as transmitted.
+ */
+export interface PresenceEntry {
+  /** The presence data */
+  readonly data: unknown;
+  /** Optional user ID from authentication */
+  readonly userId?: string;
+}
+
+/**
+ * Message received with initial presence state after authentication.
+ */
+export interface PresenceSnapshotMessage {
+  readonly type: "presence_snapshot";
+  /** This connection's ID (used to identify self) */
+  readonly selfId: string;
+  /** Map of connectionId to presence entry */
+  readonly presences: Record<string, PresenceEntry>;
+}
+
+/**
+ * Message received when another user updates their presence.
+ */
+export interface PresenceUpdateMessage {
+  readonly type: "presence_update";
+  /** The connection ID of the user who updated */
+  readonly id: string;
+  /** The presence data */
+  readonly data: unknown;
+  /** Optional user ID from authentication */
+  readonly userId?: string;
+}
+
+/**
+ * Message received when another user's presence is removed (disconnect).
+ */
+export interface PresenceRemoveMessage {
+  readonly type: "presence_remove";
+  /** The connection ID of the user who disconnected */
+  readonly id: string;
+}
+
 /**
  * Union of all possible server messages.
  */
@@ -56,7 +103,10 @@ export type ServerMessage =
   | SnapshotMessage
   | ErrorMessage
   | PongMessage
-  | AuthResultMessage;
+  | AuthResultMessage
+  | PresenceSnapshotMessage
+  | PresenceUpdateMessage
+  | PresenceRemoveMessage;
 
 // =============================================================================
 // Client Messages
@@ -92,6 +142,26 @@ export interface AuthMessage {
   readonly token: string;
 }
 
+// =============================================================================
+// Presence Client Messages
+// =============================================================================
+
+/**
+ * Message sent to set/update this client's presence.
+ */
+export interface PresenceSetMessage {
+  readonly type: "presence_set";
+  /** The presence data (validated against schema on client before sending) */
+  readonly data: unknown;
+}
+
+/**
+ * Message sent to clear this client's presence.
+ */
+export interface PresenceClearMessage {
+  readonly type: "presence_clear";
+}
+
 /**
  * Union of all possible client messages.
  */
@@ -99,7 +169,9 @@ export type ClientMessage =
   | SubmitTransactionMessage
   | RequestSnapshotMessage
   | PingMessage
-  | AuthMessage;
+  | AuthMessage
+  | PresenceSetMessage
+  | PresenceClearMessage;
 
 // =============================================================================
 // Encoded Message Types (for network transport)
@@ -130,7 +202,10 @@ export type EncodedServerMessage =
   | SnapshotMessage
   | ErrorMessage
   | PongMessage
-  | AuthResultMessage;
+  | AuthResultMessage
+  | PresenceSnapshotMessage
+  | PresenceUpdateMessage
+  | PresenceRemoveMessage;
 
 /**
  * Union of all possible encoded client messages (for network transport).
@@ -139,7 +214,9 @@ export type EncodedClientMessage =
   | EncodedSubmitTransactionMessage
   | RequestSnapshotMessage
   | PingMessage
-  | AuthMessage;
+  | AuthMessage
+  | PresenceSetMessage
+  | PresenceClearMessage;
 
 // =============================================================================
 // Transport Interface
@@ -184,6 +261,22 @@ export interface Transport {
    * Returns whether the transport is currently connected.
    */
   readonly isConnected: () => boolean;
+
+  // ===========================================================================
+  // Presence Methods
+  // ===========================================================================
+
+  /**
+   * Sends presence data to the server.
+   * The data should be validated against the presence schema before calling.
+   * @param data - The presence data to set
+   */
+  readonly sendPresenceSet: (data: unknown) => void;
+
+  /**
+   * Clears this client's presence on the server.
+   */
+  readonly sendPresenceClear: () => void;
 }
 
 // =============================================================================

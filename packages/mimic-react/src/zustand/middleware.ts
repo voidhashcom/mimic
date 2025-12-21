@@ -1,6 +1,6 @@
 import type { StateCreator, StoreMutatorIdentifier } from "zustand";
 import type { ClientDocument } from "@voidhash/mimic/client";
-import type { Primitive } from "@voidhash/mimic";
+import type { Primitive, Presence } from "@voidhash/mimic";
 import type {
   MimicSlice,
   MimicObject,
@@ -13,33 +13,50 @@ import type {
 
 type MimicMiddleware = <
   TSchema extends Primitive.AnyPrimitive,
-  T extends object,
+  TPresence extends Presence.AnyPresence | undefined = undefined,
+  T extends object = object,
   Mps extends [StoreMutatorIdentifier, unknown][] = [],
   Mcs extends [StoreMutatorIdentifier, unknown][] = [],
 >(
-  document: ClientDocument.ClientDocument<TSchema>,
-  config: StateCreator<T & MimicSlice<TSchema>, Mps, Mcs, T>,
+  document: ClientDocument.ClientDocument<TSchema, TPresence>,
+  config: StateCreator<T & MimicSlice<TSchema, TPresence>, Mps, Mcs, T>,
   options?: MimicMiddlewareOptions
-) => StateCreator<T & MimicSlice<TSchema>, Mps, Mcs, T & MimicSlice<TSchema>>;
+) => StateCreator<T & MimicSlice<TSchema, TPresence>, Mps, Mcs, T & MimicSlice<TSchema, TPresence>>;
 
 type MimicMiddlewareImpl = <
   TSchema extends Primitive.AnyPrimitive,
-  T extends object,
+  TPresence extends Presence.AnyPresence | undefined = undefined,
+  T extends object = object,
 >(
-  document: ClientDocument.ClientDocument<TSchema>,
-  config: StateCreator<T & MimicSlice<TSchema>, [], [], T>,
+  document: ClientDocument.ClientDocument<TSchema, TPresence>,
+  config: StateCreator<T & MimicSlice<TSchema, TPresence>, [], [], T>,
   options?: MimicMiddlewareOptions
-) => StateCreator<T & MimicSlice<TSchema>, [], [], T & MimicSlice<TSchema>>;
+) => StateCreator<T & MimicSlice<TSchema, TPresence>, [], [], T & MimicSlice<TSchema, TPresence>>;
 
 /**
  * Creates a MimicObject from the current document state.
  */
-const createMimicObject = <TSchema extends Primitive.AnyPrimitive>(
-  document: ClientDocument.ClientDocument<TSchema>
-): MimicObject<TSchema> => {
+const createMimicObject = <
+  TSchema extends Primitive.AnyPrimitive,
+  TPresence extends Presence.AnyPresence | undefined = undefined
+>(
+  document: ClientDocument.ClientDocument<TSchema, TPresence>
+): MimicObject<TSchema, TPresence> => {
+  const presence = document.presence
+    ? {
+        selfId: document.presence.selfId(),
+        self: document.presence.self(),
+        // Important: clone Maps to ensure zustand selectors re-render
+        // when presence changes (the underlying ClientDocument mutates Maps in-place).
+        others: new Map(document.presence.others()),
+        all: new Map(document.presence.all()),
+      }
+    : undefined;
+
   return {
     document,
     snapshot: document.root.toSnapshot() as Primitive.InferSnapshot<TSchema>,
+    presence: presence as MimicObject<TSchema, TPresence>["presence"],
     isConnected: document.isConnected(),
     isReady: document.isReady(),
     pendingCount: document.getPendingCount(),
@@ -50,10 +67,18 @@ const createMimicObject = <TSchema extends Primitive.AnyPrimitive>(
 /**
  * Implementation of the mimic middleware.
  */
-const mimicImpl: MimicMiddlewareImpl = (document, config, options = {}) => {
+const mimicImpl: MimicMiddlewareImpl = <
+  TSchema extends Primitive.AnyPrimitive,
+  TPresence extends Presence.AnyPresence | undefined = undefined,
+  T extends object = object
+>(
+  document: ClientDocument.ClientDocument<TSchema, TPresence>,
+  config: any,
+  options: MimicMiddlewareOptions = {}
+) => {
   const { autoSubscribe = true, autoConnect = true } = options;
 
-  return (set, get, api) => {
+  return (set: any, get: any, api: any) => {
     // Create initial mimic slice
     const initialMimic = createMimicObject(document);
 
@@ -82,6 +107,13 @@ const mimicImpl: MimicMiddlewareImpl = (document, config, options = {}) => {
           updateMimicState();
         },
       });
+
+      // Subscribe to presence changes (if presence schema is enabled)
+      document.presence?.subscribe({
+        onPresenceChange: () => {
+          updateMimicState();
+        },
+      });
     }
 
     if (autoConnect) {
@@ -90,7 +122,7 @@ const mimicImpl: MimicMiddlewareImpl = (document, config, options = {}) => {
 
     // Get user's state - pass through set/get/api directly
     // The user's set calls won't affect mimic state since we update it separately
-    const userState = config(set as any, get, api);
+    const userState = config(set, get, api);
 
     // Combine user state with mimic slice
     return {
@@ -106,6 +138,7 @@ const mimicImpl: MimicMiddlewareImpl = (document, config, options = {}) => {
  * Adds a `mimic` object to the store containing:
  * - `document`: The ClientDocument instance for performing transactions
  * - `snapshot`: Read-only snapshot of the document state (reactive)
+ * - `presence`: Reactive presence snapshot (self + others). Undefined if presence is not enabled on the ClientDocument.
  * - `isConnected`: Connection status
  * - `isReady`: Ready status
  * - `pendingCount`: Number of pending transactions
@@ -124,6 +157,10 @@ const mimicImpl: MimicMiddlewareImpl = (document, config, options = {}) => {
  * 
  * // Read snapshot (reactive)
  * const snapshot = useStore(state => state.mimic.snapshot)
+ * 
+ * // Read presence (reactive, if enabled)
+ * const myPresence = useStore(state => state.mimic.presence?.self)
+ * const othersPresence = useStore(state => state.mimic.presence?.others)
  * 
  * // Write via document
  * store.getState().mimic.document.transaction(root => {

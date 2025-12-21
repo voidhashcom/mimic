@@ -1,5 +1,6 @@
 import * as Document from "../Document";
 import * as Transaction from "../Transaction";
+import * as Presence from "../Presence";
 import type * as Primitive from "../Primitive";
 import type * as Transport from "./Transport";
 import * as Rebase from "./Rebase";
@@ -35,10 +36,71 @@ type InitState =
   | { readonly type: "initializing"; readonly bufferedMessages: Transport.ServerMessage[] }
   | { readonly type: "ready" };
 
+// =============================================================================
+// Presence Types
+// =============================================================================
+
+/**
+ * Listener for presence changes.
+ */
+export interface PresenceListener<TData> {
+  /** Called when any presence changes (self or others) */
+  readonly onPresenceChange?: () => void;
+}
+
+/**
+ * Presence API exposed on the ClientDocument.
+ */
+export interface ClientPresence<TData> {
+  /**
+   * Returns this client's connection ID (set after receiving presence_snapshot).
+   * Returns undefined before the snapshot is received.
+   */
+  readonly selfId: () => string | undefined;
+
+  /**
+   * Returns this client's current presence data.
+   * Returns undefined if not set.
+   */
+  readonly self: () => TData | undefined;
+
+  /**
+   * Returns a map of other clients' presence data.
+   * Keys are connection IDs.
+   */
+  readonly others: () => ReadonlyMap<string, Presence.PresenceEntry<TData>>;
+
+  /**
+   * Returns all presence entries including self.
+   */
+  readonly all: () => ReadonlyMap<string, Presence.PresenceEntry<TData>>;
+
+  /**
+   * Sets this client's presence data.
+   * Validates against the presence schema before sending.
+   * @throws ParseError if validation fails
+   */
+  readonly set: (data: TData) => void;
+
+  /**
+   * Clears this client's presence data.
+   */
+  readonly clear: () => void;
+
+  /**
+   * Subscribes to presence changes.
+   * @returns Unsubscribe function
+   */
+  readonly subscribe: (listener: PresenceListener<TData>) => () => void;
+}
+
 /**
  * Options for creating a ClientDocument.
  */
-export interface ClientDocumentOptions<TSchema extends Primitive.AnyPrimitive> {
+export interface ClientDocumentOptions<
+  TSchema extends Primitive.AnyPrimitive,
+  TPresence extends Presence.AnyPresence | undefined = undefined
+> {
   /** The schema defining the document structure */
   readonly schema: TSchema;
   /** Transport for server communication */
@@ -64,6 +126,13 @@ export interface ClientDocumentOptions<TSchema extends Primitive.AnyPrimitive> {
   readonly initTimeout?: number;
   /** Enable debug logging for all activity (default: false) */
   readonly debug?: boolean;
+  /**
+   * Optional presence schema for ephemeral per-user data.
+   * When provided, enables the presence API on the ClientDocument.
+   */
+  readonly presence?: TPresence;
+  /** Initial presence data, that will be set on the ClientDocument when it is created */
+  readonly initialPresence?: TPresence extends Presence.AnyPresence ? Presence.Infer<TPresence> : undefined;
 }
 
 /**
@@ -81,7 +150,10 @@ export interface ClientDocumentListener<TSchema extends Primitive.AnyPrimitive> 
 /**
  * A ClientDocument provides optimistic updates with server synchronization.
  */
-export interface ClientDocument<TSchema extends Primitive.AnyPrimitive> {
+export interface ClientDocument<
+  TSchema extends Primitive.AnyPrimitive,
+  TPresence extends Presence.AnyPresence | undefined = undefined
+> {
   /** The schema defining this document's structure */
   readonly schema: TSchema;
 
@@ -139,6 +211,14 @@ export interface ClientDocument<TSchema extends Primitive.AnyPrimitive> {
    * @returns Unsubscribe function
    */
   subscribe(listener: ClientDocumentListener<TSchema>): () => void;
+
+  /**
+   * Presence API for ephemeral per-user data.
+   * Only available when presence schema is provided in options.
+   */
+  readonly presence: TPresence extends Presence.AnyPresence
+    ? ClientPresence<Presence.Infer<TPresence>>
+    : undefined;
 }
 
 // =============================================================================
@@ -148,9 +228,12 @@ export interface ClientDocument<TSchema extends Primitive.AnyPrimitive> {
 /**
  * Creates a new ClientDocument for the given schema.
  */
-export const make = <TSchema extends Primitive.AnyPrimitive>(
-  options: ClientDocumentOptions<TSchema>
-): ClientDocument<TSchema> => {
+export const make = <
+  TSchema extends Primitive.AnyPrimitive,
+  TPresence extends Presence.AnyPresence | undefined = undefined
+>(
+  options: ClientDocumentOptions<TSchema, TPresence>
+): ClientDocument<TSchema, TPresence> => {
   const {
     schema,
     transport,
@@ -163,6 +246,8 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     transactionTimeout = 30000,
     initTimeout = 10000,
     debug = false,
+    presence: presenceSchema,
+    initialPresence,
   } = options;
 
   // ==========================================================================
@@ -203,6 +288,22 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
   // Subscribers for events (added after creation via subscribe())
   const _subscribers = new Set<ClientDocumentListener<TSchema>>();
+
+  // ==========================================================================
+  // Presence State (only used when presenceSchema is provided)
+  // ==========================================================================
+
+  // This client's connection ID (received from presence_snapshot)
+  let _presenceSelfId: string | undefined = undefined;
+
+  // This client's current presence data
+  let _presenceSelfData: unknown = undefined;
+
+  // Other clients' presence entries (connectionId -> entry)
+  const _presenceOthers = new Map<string, Presence.PresenceEntry<unknown>>();
+
+  // Presence change subscribers
+  const _presenceSubscribers = new Set<PresenceListener<unknown>>();
 
   // ==========================================================================
   // Debug Logging
@@ -263,6 +364,93 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     for (const listener of _subscribers) {
       listener.onReady?.();
     }
+  };
+
+  /**
+   * Notifies all presence listeners of a change.
+   */
+  const notifyPresenceChange = (): void => {
+    debugLog("notifyPresenceChange", {
+      subscriberCount: _presenceSubscribers.size,
+    });
+    for (const listener of _presenceSubscribers) {
+      try {
+        listener.onPresenceChange?.();
+      } catch {
+        // Ignore listener errors
+      }
+    }
+  };
+
+  // ==========================================================================
+  // Presence Handlers
+  // ==========================================================================
+
+  /**
+   * Handles incoming presence snapshot from server.
+   */
+  const handlePresenceSnapshot = (message: Transport.PresenceSnapshotMessage): void => {
+    if (!presenceSchema) return;
+
+    debugLog("handlePresenceSnapshot", {
+      selfId: message.selfId,
+      presenceCount: Object.keys(message.presences).length,
+    });
+
+    _presenceSelfId = message.selfId;
+    _presenceOthers.clear();
+
+    // Populate others from snapshot (exclude self)
+    for (const [id, entry] of Object.entries(message.presences)) {
+      if (id !== message.selfId) {
+        _presenceOthers.set(id, entry);
+      }
+    }
+
+    notifyPresenceChange();
+  };
+
+  /**
+   * Handles incoming presence update from server (another user).
+   */
+  const handlePresenceUpdate = (message: Transport.PresenceUpdateMessage): void => {
+    if (!presenceSchema) return;
+
+    debugLog("handlePresenceUpdate", {
+      id: message.id,
+      userId: message.userId,
+    });
+
+    _presenceOthers.set(message.id, {
+      data: message.data,
+      userId: message.userId,
+    });
+
+    notifyPresenceChange();
+  };
+
+  /**
+   * Handles incoming presence remove from server (user disconnected).
+   */
+  const handlePresenceRemove = (message: Transport.PresenceRemoveMessage): void => {
+    if (!presenceSchema) return;
+
+    debugLog("handlePresenceRemove", {
+      id: message.id,
+    });
+
+    _presenceOthers.delete(message.id);
+    notifyPresenceChange();
+  };
+
+  /**
+   * Clears all presence state (on disconnect).
+   */
+  const clearPresenceState = (): void => {
+    _presenceSelfId = undefined;
+    _presenceSelfData = undefined;
+    _presenceOthers.clear();
+    notifyPresenceChange();
   };
 
   // ==========================================================================
@@ -661,12 +849,28 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   /**
    * Handles incoming server messages.
    * During initialization, messages are buffered until the snapshot arrives.
+   * Presence messages are always processed immediately (not buffered).
    */
   const handleServerMessage = (message: Transport.ServerMessage): void => {
     debugLog("handleServerMessage", {
       messageType: message.type,
       initState: _initState.type,
     });
+
+    // Presence messages are always handled immediately (not buffered)
+    // This allows presence to work even during document initialization
+    if (message.type === "presence_snapshot") {
+      handlePresenceSnapshot(message);
+      return;
+    }
+    if (message.type === "presence_update") {
+      handlePresenceUpdate(message);
+      return;
+    }
+    if (message.type === "presence_remove") {
+      handlePresenceRemove(message);
+      return;
+    }
 
     // Handle based on initialization state
     if (_initState.type === "initializing") {
@@ -709,7 +913,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   // Public API
   // ==========================================================================
 
-  const clientDocument: ClientDocument<TSchema> = {
+  const clientDocument = {
     schema,
 
     get root() {
@@ -775,6 +979,15 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
       notifyConnectionChange(true);
 
+      // Set initial presence if provided
+      if (presenceSchema && initialPresence !== undefined) {
+        debugLog("connect: setting initial presence", { initialPresence });
+        const validated = Presence.validate(presenceSchema, initialPresence);
+        _presenceSelfData = validated;
+        transport.sendPresenceSet(validated);
+        notifyPresenceChange();
+      }
+
       // If we already have initial state, we're ready immediately
       if (_initState.type === "ready") {
         debugLog("connect: already ready (has initial state)");
@@ -799,7 +1012,9 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
       // Request initial snapshot
       debugLog("connect: requesting initial snapshot");
+   
       transport.requestSnapshot();
+
 
       // Wait for initialization to complete
       await readyPromise;
@@ -836,6 +1051,9 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
         _initState = { type: "uninitialized" };
       }
 
+      // Clear presence state
+      clearPresenceState();
+
       // Unsubscribe
       if (_unsubscribe) {
         _unsubscribe();
@@ -870,7 +1088,76 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
         _subscribers.delete(listener);
       };
     },
-  };
+
+    // =========================================================================
+    // Presence API
+    // =========================================================================
+
+    presence: (presenceSchema
+      ? {
+          selfId: () => _presenceSelfId,
+
+          self: () => _presenceSelfData as Presence.Infer<NonNullable<TPresence>> | undefined,
+
+          others: () => _presenceOthers as ReadonlyMap<string, Presence.PresenceEntry<Presence.Infer<NonNullable<TPresence>>>>,
+
+          all: () => {
+            const all = new Map<string, Presence.PresenceEntry<unknown>>();
+            // Add others
+            for (const [id, entry] of _presenceOthers) {
+              all.set(id, entry);
+            }
+            // Add self if we have data
+            if (_presenceSelfId !== undefined && _presenceSelfData !== undefined) {
+              all.set(_presenceSelfId, { data: _presenceSelfData });
+            }
+            return all as ReadonlyMap<string, Presence.PresenceEntry<Presence.Infer<NonNullable<TPresence>>>>;
+          },
+
+          set: (data: Presence.Infer<NonNullable<TPresence>>) => {
+            if (!presenceSchema) return;
+
+            // Validate against schema (throws if invalid)
+            const validated = Presence.validate(presenceSchema, data);
+
+            debugLog("presence.set", { data: validated });
+
+            // Update local state
+            _presenceSelfData = validated;
+
+            // Send to server
+            transport.sendPresenceSet(validated);
+
+            // Notify listeners
+            notifyPresenceChange();
+          },
+
+          clear: () => {
+            if (!presenceSchema) return;
+
+            debugLog("presence.clear");
+
+            // Clear local state
+            _presenceSelfData = undefined;
+
+            // Send to server
+            transport.sendPresenceClear();
+
+            // Notify listeners
+            notifyPresenceChange();
+          },
+
+          subscribe: (listener: PresenceListener<Presence.Infer<NonNullable<TPresence>>>) => {
+            _presenceSubscribers.add(listener as PresenceListener<unknown>);
+            return () => {
+              _presenceSubscribers.delete(listener as PresenceListener<unknown>);
+            };
+          },
+        }
+      : undefined) as TPresence extends Presence.AnyPresence
+      ? ClientPresence<Presence.Infer<TPresence>>
+      : undefined,
+  } as ClientDocument<TSchema, TPresence>;
 
   return clientDocument;
 };

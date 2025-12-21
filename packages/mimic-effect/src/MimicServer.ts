@@ -7,13 +7,14 @@ import * as Layer from "effect/Layer";
 import * as Context from "effect/Context";
 import type * as Socket from "@effect/platform/Socket";
 import { SocketServer } from "@effect/platform/SocketServer";
-import type { Primitive } from "@voidhash/mimic";
+import type { Primitive, Presence } from "@voidhash/mimic";
 
 import * as DocumentManager from "./DocumentManager.js";
 import * as WebSocketHandler from "./WebSocketHandler.js";
 import * as MimicConfig from "./MimicConfig.js";
 import { MimicDataStorageTag } from "./MimicDataStorage.js";
 import { MimicAuthServiceTag } from "./MimicAuthService.js";
+import * as PresenceManager from "./PresenceManager.js";
 import * as InMemoryDataStorage from "./storage/InMemoryDataStorage.js";
 import * as NoAuth from "./auth/NoAuth.js";
 import { HttpLayerRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform";
@@ -55,6 +56,11 @@ export interface MimicLayerOptions<TSchema extends Primitive.AnyPrimitive> {
    * @default 1000
    */
   readonly maxTransactionHistory?: number;
+  /**
+   * Optional presence schema for ephemeral per-user data.
+   * When provided, enables presence features on WebSocket connections.
+   */
+  readonly presence?: Presence.AnyPresence;
 }
 
 // =============================================================================
@@ -104,12 +110,14 @@ export const layer = <TSchema extends Primitive.AnyPrimitive>(
   const configLayer = MimicConfig.layer({
     schema: options.schema,
     maxTransactionHistory: options.maxTransactionHistory,
+    presence: options.presence,
   });
 
   return Layer.merge(
     // Handler layer
     Layer.effect(MimicWebSocketHandler, WebSocketHandler.makeHandler).pipe(
       Layer.provide(DocumentManager.layer),
+      Layer.provide(PresenceManager.layer),
       Layer.provide(configLayer)
     ),
     // Document manager layer
@@ -162,6 +170,7 @@ export const handlerLayer = <TSchema extends Primitive.AnyPrimitive>(
 ): Layer.Layer<MimicWebSocketHandler> =>
   Layer.effect(MimicWebSocketHandler, WebSocketHandler.makeHandler).pipe(
     Layer.provide(DocumentManager.layer),
+    Layer.provide(PresenceManager.layer),
     Layer.provide(MimicConfig.layer(options)),
     // Provide defaults
     Layer.provide(InMemoryDataStorage.layerDefault),
@@ -226,6 +235,7 @@ const makeMimicHandler = Effect.gen(function* () {
   const config = yield* MimicConfig.MimicServerConfigTag;
   const authService = yield* MimicAuthServiceTag;
   const documentManager = yield* DocumentManager.DocumentManagerTag;
+  const presenceManager = yield* PresenceManager.PresenceManagerTag;
 
   return Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -242,6 +252,7 @@ const makeMimicHandler = Effect.gen(function* () {
       Effect.provideService(MimicConfig.MimicServerConfigTag, config),
       Effect.provideService(MimicAuthServiceTag, authService),
       Effect.provideService(DocumentManager.DocumentManagerTag, documentManager),
+      Effect.provideService(PresenceManager.PresenceManagerTag, presenceManager),
       Effect.scoped,
       Effect.catchAll((error) =>
         Effect.logError("WebSocket connection error", error)
@@ -327,6 +338,7 @@ export const layerHttpLayerRouter = <TSchema extends Primitive.AnyPrimitive>(
   const configLayer = MimicConfig.layer({
     schema: options.schema,
     maxTransactionHistory: options.maxTransactionHistory,
+    presence: options.presence,
   });
 
   // Use provided layers or defaults
@@ -343,6 +355,7 @@ export const layerHttpLayerRouter = <TSchema extends Primitive.AnyPrimitive>(
   // Build the layer with all dependencies
   return Layer.scopedDiscard(registerRoute).pipe(
     Layer.provide(DocumentManager.layer),
+    Layer.provide(PresenceManager.layer),
     Layer.provide(configLayer),
     Layer.provide(storageLayer),
     Layer.provide(authLayer)

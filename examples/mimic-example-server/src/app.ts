@@ -1,7 +1,8 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { MimicServer, MimicAuthService } from "@voidhash/mimic-effect";
-import { MimicExampleSchema } from "@voidhash/mimic-example-shared";
+import { MimicExampleSchema, PresenceSchema } from "@voidhash/mimic-example-shared";
 import { HttpLayerRouter } from "@effect/platform";
+import { Presence } from "@voidhash/mimic";
 
 // Custom auth layer - allows all tokens
 const CustomAuthLayer = MimicAuthService.layer({
@@ -11,11 +12,13 @@ const CustomAuthLayer = MimicAuthService.layer({
   }),
 });
 
-// Create the Mimic route for HttpLayerRouter with custom auth
+
+// Create the Mimic route for HttpLayerRouter with custom auth and presence
 const MimicRoute = MimicServer.layerHttpLayerRouter({
   basePath: "/mimic/todo",
   schema: MimicExampleSchema,
   authLayer: CustomAuthLayer,
+  presence: PresenceSchema,
 });
 
 const AllRoutes = Layer.mergeAll(

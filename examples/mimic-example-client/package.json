@@ -29,6 +29,7 @@
     "@tanstack/router-plugin": "^1.141.7",
     "@voidhash/mimic-example-shared": "workspace:*",
     "@voidhash/mimic-react": "workspace:*",
+    "effect": "catalog:",
     "postcss": "^8.5.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -52,7 +53,6 @@
   "peerDependencies": {
     "@voidhash/mimic": "workspace:*",
     "@effect/platform-bun": "catalog:",
-    "@effect/platform": "catalog:",
-    "effect": "catalog:"
+    "@effect/platform": "catalog:"
   }
 }

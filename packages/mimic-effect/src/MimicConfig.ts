@@ -6,7 +6,7 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import type { DurationInput } from "effect/Duration";
 import * as Layer from "effect/Layer";
-import type { Primitive } from "@voidhash/mimic";
+import type { Primitive, Presence } from "@voidhash/mimic";
 
 // =============================================================================
 // Mimic Server Configuration
@@ -47,6 +47,13 @@ export interface MimicServerConfig<TSchema extends Primitive.AnyPrimitive = Prim
    * @default "10 seconds"
    */
   readonly heartbeatTimeout: Duration.Duration;
+
+  /**
+   * Optional presence schema for ephemeral per-user data.
+   * When provided, enables presence features on WebSocket connections.
+   * @default undefined (presence disabled)
+   */
+  readonly presence: Presence.AnyPresence | undefined;
 }
 
 /**
@@ -81,6 +88,13 @@ export interface MimicServerConfigOptions<TSchema extends Primitive.AnyPrimitive
    * @default "10 seconds"
    */
   readonly heartbeatTimeout?: DurationInput;
+
+  /**
+   * Optional presence schema for ephemeral per-user data.
+   * When provided, enables presence features on WebSocket connections.
+   * @default undefined (presence disabled)
+   */
+  readonly presence?: Presence.AnyPresence;
 }
 
 /**
@@ -94,6 +108,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   maxTransactionHistory: options.maxTransactionHistory ?? 1000,
   heartbeatInterval: Duration.decode(options.heartbeatInterval ?? "30 seconds"),
   heartbeatTimeout: Duration.decode(options.heartbeatTimeout ?? "10 seconds"),
+  presence: options.presence,
 });
 
 // =============================================================================

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createStore } from "zustand";
 import { mimic } from "../../src/zustand/middleware";
 import type { ClientDocument } from "@voidhash/mimic/client";
-import type { Primitive } from "@voidhash/mimic";
+import type { Primitive, Presence } from "@voidhash/mimic";
 
 // =============================================================================
 // Mock ClientDocument
@@ -14,6 +14,11 @@ interface MockClientDocumentState {
   isReady: boolean;
   pendingCount: number;
   hasPendingChanges: boolean;
+  // Presence
+  presenceEnabled: boolean;
+  presenceSelfId?: string;
+  presenceSelf?: unknown;
+  presenceOthers: Map<string, Presence.PresenceEntry<unknown>>;
 }
 
 interface MockClientDocument {
@@ -22,16 +27,25 @@ interface MockClientDocument {
   isReady: () => boolean;
   getPendingCount: () => number;
   hasPendingChanges: () => boolean;
+  connect: () => void;
   subscribe: (listener: {
     onStateChange?: () => void;
     onConnectionChange?: () => void;
     onReady?: () => void;
   }) => () => void;
+  presence?: {
+    selfId: () => string | undefined;
+    self: () => unknown | undefined;
+    others: () => ReadonlyMap<string, Presence.PresenceEntry<unknown>>;
+    all: () => ReadonlyMap<string, Presence.PresenceEntry<unknown>>;
+    subscribe: (listener: { onPresenceChange?: () => void }) => () => void;
+  };
   // Helpers to update state and trigger events
   _setState: (updates: Partial<MockClientDocumentState>) => void;
   _triggerStateChange: () => void;
   _triggerConnectionChange: () => void;
   _triggerReady: () => void;
+  _triggerPresenceChange: () => void;
   _getSubscriberCount: () => number;
 }
 
@@ -44,6 +58,8 @@ const createMockClientDocument = (
     isReady: false,
     pendingCount: 0,
     hasPendingChanges: false,
+    presenceEnabled: false,
+    presenceOthers: new Map(),
     ...initial,
   };
 
@@ -53,6 +69,8 @@ const createMockClientDocument = (
     onReady?: () => void;
   }>();
 
+  const presenceListeners = new Set<{ onPresenceChange?: () => void }>();
+
   return {
     root: {
       toSnapshot: () => state.snapshot,
@@ -61,12 +79,38 @@ const createMockClientDocument = (
     isReady: () => state.isReady,
     getPendingCount: () => state.pendingCount,
     hasPendingChanges: () => state.hasPendingChanges,
+    connect: () => {
+      // Mock connect - does nothing in tests
+    },
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
+    presence: state.presenceEnabled
+      ? {
+          selfId: () => state.presenceSelfId,
+          self: () => state.presenceSelf,
+          others: () => state.presenceOthers,
+          all: () => {
+            const all = new Map<string, Presence.PresenceEntry<unknown>>();
+            for (const [id, entry] of state.presenceOthers) {
+              all.set(id, entry);
+            }
+            if (state.presenceSelfId !== undefined && state.presenceSelf !== undefined) {
+              all.set(state.presenceSelfId, { data: state.presenceSelf });
+            }
+            return all;
+          },
+          subscribe: (listener) => {
+            presenceListeners.add(listener);
+            return () => {
+              presenceListeners.delete(listener);
+            };
+          },
+        }
+      : undefined,
     _setState: (updates) => {
       state = { ...state, ...updates };
     },
@@ -83,6 +127,11 @@ const createMockClientDocument = (
     _triggerReady: () => {
       for (const listener of listeners) {
         listener.onReady?.();
+      }
+    },
+    _triggerPresenceChange: () => {
+      for (const listener of presenceListeners) {
+        listener.onPresenceChange?.();
       }
     },
     _getSubscriberCount: () => listeners.size,
@@ -300,6 +349,66 @@ describe("mimic middleware", () => {
     });
   });
 
+  describe("Presence", () => {
+    it("should expose reactive self + others presence when enabled", () => {
+      mockDocument = createMockClientDocument({
+        presenceEnabled: true,
+        presenceSelfId: "self",
+        presenceSelf: { name: "me" },
+        presenceOthers: new Map([
+          ["other-1", { data: { name: "alice" }, userId: "u1" }],
+        ]),
+      });
+
+      const store = createStore(
+        mimic(mockDocument as unknown as ClientDocument.ClientDocument<TestSchema>, () => ({}))
+      );
+
+      const presence = (store.getState().mimic as any).presence;
+      expect(presence).toBeDefined();
+      expect(presence.selfId).toBe("self");
+      expect(presence.self).toEqual({ name: "me" });
+      expect(presence.others).toBeInstanceOf(Map);
+      expect(presence.all).toBeInstanceOf(Map);
+      expect(presence.others.get("other-1")).toEqual({ data: { name: "alice" }, userId: "u1" });
+      expect(presence.all.get("self")).toEqual({ data: { name: "me" } });
+    });
+
+    it("should update store when onPresenceChange fires (and clone Map references)", () => {
+      mockDocument = createMockClientDocument({
+        presenceEnabled: true,
+        presenceSelfId: "self",
+        presenceSelf: { name: "me" },
+        presenceOthers: new Map(),
+      });
+
+      const store = createStore(
+        mimic(mockDocument as unknown as ClientDocument.ClientDocument<TestSchema>, () => ({}))
+      );
+
+      const beforePresence = (store.getState().mimic as any).presence;
+      const beforeOthersRef = beforePresence.others;
+      expect(beforePresence.self).toEqual({ name: "me" });
+      expect(beforePresence.others.size).toBe(0);
+
+      // Update others + self and trigger presence change
+      mockDocument._setState({
+        presenceSelf: { name: "me-2" },
+        presenceOthers: new Map([
+          ["other-1", { data: { name: "alice" }, userId: "u1" }],
+        ]),
+      });
+      mockDocument._triggerPresenceChange();
+
+      const afterPresence = (store.getState().mimic as any).presence;
+      expect(afterPresence.self).toEqual({ name: "me-2" });
+      expect(afterPresence.others.get("other-1")).toEqual({ data: { name: "alice" }, userId: "u1" });
+
+      // Critical: maps should be new references so selectors re-render
+      expect(afterPresence.others).not.toBe(beforeOthersRef);
+    });
+  });
+
   describe("Options", () => {
     it("should subscribe to document events by default (autoSubscribe: true)", () => {
       const store = createStore(
@@ -355,7 +464,7 @@ describe("mimic middleware", () => {
       }
 
       const store = createStore(
-        mimic<TestSchema, UserState>(
+        mimic<TestSchema, undefined, UserState>(
           mockDocument as unknown as ClientDocument.ClientDocument<TestSchema>,
           (set) => ({
             localCount: 0,
@@ -380,7 +489,7 @@ describe("mimic middleware", () => {
       }
 
       const store = createStore(
-        mimic<TestSchema, UserState>(
+        mimic<TestSchema, undefined, UserState>(
           mockDocument as unknown as ClientDocument.ClientDocument<TestSchema>,
           (set, get) => ({
             localCount: 5,
@@ -403,7 +512,7 @@ describe("mimic middleware", () => {
       }
 
       const store = createStore(
-        mimic<TestSchema, UserState>(
+        mimic<TestSchema, undefined, UserState>(
           mockDocument as unknown as ClientDocument.ClientDocument<TestSchema>,
           (set) => ({
             value: "initial",

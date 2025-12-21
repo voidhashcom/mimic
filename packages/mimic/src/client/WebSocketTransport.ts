@@ -536,6 +536,36 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
     isConnected: (): boolean => {
       return _state.type === "connected";
     },
+
+    // =========================================================================
+    // Presence Methods
+    // =========================================================================
+
+    sendPresenceSet: (data: unknown): void => {
+      const message: Transport.ClientMessage = { type: "presence_set", data };
+
+      if (_state.type === "connected") {
+        sendRaw(message);
+      } else if (_state.type === "reconnecting") {
+        // Remove all set messages from the message queue
+        _messageQueue = _messageQueue.filter((message) => message.type !== "presence_set");
+        // Add the new presence set message to the queue
+        _messageQueue.push(message);
+      }
+    },
+
+    sendPresenceClear: (): void => {
+      const message: Transport.ClientMessage = { type: "presence_clear" };
+
+      if (_state.type === "connected") {
+        sendRaw(message);
+      } else if (_state.type === "reconnecting") {
+        // Remove all clear messages from the message queue
+        _messageQueue = _messageQueue.filter((message) => message.type !== "presence_clear");
+        // Add the new presence clear message to the queue
+        _messageQueue.push(message);
+      }
+    },
   };
 
   return transport;

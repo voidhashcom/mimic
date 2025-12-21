@@ -8,12 +8,14 @@ import * as Fiber from "effect/Fiber";
 import * as Scope from "effect/Scope";
 import * as Duration from "effect/Duration";
 import type * as Socket from "@effect/platform/Socket";
-import { Transaction } from "@voidhash/mimic";
+import { Transaction, Presence } from "@voidhash/mimic";
 
 import * as Protocol from "./DocumentProtocol.js";
 import { MimicServerConfigTag } from "./MimicConfig.js";
 import { MimicAuthServiceTag } from "./MimicAuthService.js";
 import { DocumentManagerTag } from "./DocumentManager.js";
+import { PresenceManagerTag } from "./PresenceManager.js";
+import type * as PresenceManager from "./PresenceManager.js";
 import {
   MessageParseError,
   MissingDocumentIdError,
@@ -46,17 +48,30 @@ interface AuthMessage {
   readonly token: string;
 }
 
+interface PresenceSetMessage {
+  readonly type: "presence_set";
+  readonly data: unknown;
+}
+
+interface PresenceClearMessage {
+  readonly type: "presence_clear";
+}
+
 type ClientMessage =
   | SubmitMessage
   | RequestSnapshotMessage
   | PingMessage
-  | AuthMessage;
+  | AuthMessage
+  | PresenceSetMessage
+  | PresenceClearMessage;
 
 type EncodedClientMessage =
   | EncodedSubmitMessage
   | RequestSnapshotMessage
   | PingMessage
-  | AuthMessage;
+  | AuthMessage
+  | PresenceSetMessage
+  | PresenceClearMessage;
 
 // =============================================================================
 // Server Message Types (matching mimic-client Transport.ts)
@@ -78,19 +93,44 @@ interface EncodedTransactionMessage {
   readonly version: number;
 }
 
+// Presence server messages
+interface PresenceSnapshotMessage {
+  readonly type: "presence_snapshot";
+  readonly selfId: string;
+  readonly presences: Record<string, { data: unknown; userId?: string }>;
+}
+
+interface PresenceUpdateMessage {
+  readonly type: "presence_update";
+  readonly id: string;
+  readonly data: unknown;
+  readonly userId?: string;
+}
+
+interface PresenceRemoveMessage {
+  readonly type: "presence_remove";
+  readonly id: string;
+}
+
 type ServerMessage =
   | Protocol.TransactionMessage
   | Protocol.SnapshotMessage
   | Protocol.ErrorMessage
   | PongMessage
-  | AuthResultMessage;
+  | AuthResultMessage
+  | PresenceSnapshotMessage
+  | PresenceUpdateMessage
+  | PresenceRemoveMessage;
 
 type EncodedServerMessage =
   | EncodedTransactionMessage
   | Protocol.SnapshotMessage
   | Protocol.ErrorMessage
   | PongMessage
-  | AuthResultMessage;
+  | AuthResultMessage
+  | PresenceSnapshotMessage
+  | PresenceUpdateMessage
+  | PresenceRemoveMessage;
 
 // =============================================================================
 // WebSocket Connection State
@@ -190,12 +230,13 @@ export const handleConnection = (
 ): Effect.Effect<
   void,
   Socket.SocketError | MissingDocumentIdError | MessageParseError,
-  MimicServerConfigTag | MimicAuthServiceTag | DocumentManagerTag | Scope.Scope
+  MimicServerConfigTag | MimicAuthServiceTag | DocumentManagerTag | PresenceManagerTag | Scope.Scope
 > =>
   Effect.gen(function* () {
     const config = yield* MimicServerConfigTag;
     const authService = yield* MimicAuthServiceTag;
     const documentManager = yield* DocumentManagerTag;
+    const presenceManager = yield* PresenceManagerTag;
 
     // Extract document ID from path
     const documentId = yield* extractDocumentId(path);
@@ -208,12 +249,27 @@ export const handleConnection = (
       authenticated: false, // Start unauthenticated, auth service will validate
     };
 
+    // Track if this connection has set presence (for cleanup)
+    let hasPresence = false;
+
     // Get the socket writer
     const write = yield* socket.writer;
 
     // Helper to send a message to the client
     const sendMessage = (message: ServerMessage) =>
       write(encodeServerMessage(message));
+
+    // Send presence snapshot after auth
+    const sendPresenceSnapshot = Effect.gen(function* () {
+      if (!config.presence) return;
+
+      const snapshot = yield* presenceManager.getSnapshot(documentId);
+      yield* sendMessage({
+        type: "presence_snapshot",
+        selfId: connectionId,
+        presences: snapshot.presences,
+      });
+    });
 
     // Handle authentication using the auth service
     const handleAuth = (token: string) =>
@@ -227,6 +283,9 @@ export const handleConnection = (
             userId: result.userId,
           };
           yield* sendMessage({ type: "auth_result", success: true });
+
+          // Send presence snapshot after successful auth
+          yield* sendPresenceSnapshot;
         } else {
           yield* sendMessage({
             type: "auth_result",
@@ -235,6 +294,37 @@ export const handleConnection = (
           });
         }
       });
+
+    // Handle presence set
+    const handlePresenceSet = (data: unknown) =>
+      Effect.gen(function* () {
+        if (!state.authenticated) return;
+        if (!config.presence) return;
+
+        // Validate presence data against schema
+        const validated = Presence.validateSafe(config.presence, data);
+        if (validated === undefined) {
+          yield* Effect.logWarning("Invalid presence data received", { connectionId, data });
+          return;
+        }
+
+        // Store in presence manager
+        yield* presenceManager.set(documentId, connectionId, {
+          data: validated,
+          userId: state.userId,
+        });
+
+        hasPresence = true;
+      });
+
+    // Handle presence clear
+    const handlePresenceClear = Effect.gen(function* () {
+      if (!state.authenticated) return;
+      if (!config.presence) return;
+
+      yield* presenceManager.remove(documentId, connectionId);
+      hasPresence = false;
+    });
 
     // Handle a client message
     const handleMessage = (message: ClientMessage) =>
@@ -287,6 +377,14 @@ export const handleConnection = (
             );
             yield* sendMessage(snapshot);
             break;
+
+          case "presence_set":
+            yield* handlePresenceSet(message.data);
+            break;
+
+          case "presence_clear":
+            yield* handlePresenceClear;
+            break;
         }
       });
 
@@ -311,11 +409,54 @@ export const handleConnection = (
       }).pipe(Effect.scoped)
     );
 
+    // Subscribe to presence events (if presence is enabled)
+    const presenceFiber = yield* Effect.fork(
+      Effect.gen(function* () {
+        if (!config.presence) return;
+
+        // Wait until authenticated before subscribing
+        while (!state.authenticated) {
+          yield* Effect.sleep(Duration.millis(100));
+        }
+
+        // Subscribe to presence events
+        const presenceStream = yield* presenceManager.subscribe(documentId);
+
+        // Forward presence events to the WebSocket, filtering out our own events (no-echo)
+        yield* Stream.runForEach(presenceStream, (event) =>
+          Effect.gen(function* () {
+            // Don't echo our own presence events
+            if (event.id === connectionId) return;
+
+            if (event.type === "presence_update") {
+              yield* sendMessage({
+                type: "presence_update",
+                id: event.id,
+                data: event.data,
+                userId: event.userId,
+              });
+            } else if (event.type === "presence_remove") {
+              yield* sendMessage({
+                type: "presence_remove",
+                id: event.id,
+              });
+            }
+          })
+        );
+      }).pipe(Effect.scoped)
+    );
+
     // Ensure cleanup on disconnect
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
-        // Interrupt the subscribe fiber
+        // Interrupt the subscribe fibers
         yield* Fiber.interrupt(subscribeFiber);
+        yield* Fiber.interrupt(presenceFiber);
+
+        // Remove presence if we had any
+        if (hasPresence && config.presence) {
+          yield* presenceManager.remove(documentId, connectionId);
+        }
       })
     );
 
@@ -344,12 +485,14 @@ export const makeHandler = Effect.gen(function* () {
   const config = yield* MimicServerConfigTag;
   const authService = yield* MimicAuthServiceTag;
   const documentManager = yield* DocumentManagerTag;
+  const presenceManager = yield* PresenceManagerTag;
 
   return (socket: Socket.Socket, documentId: string) =>
     handleConnectionWithDocumentId(socket, documentId).pipe(
       Effect.provideService(MimicServerConfigTag, config),
       Effect.provideService(MimicAuthServiceTag, authService),
       Effect.provideService(DocumentManagerTag, documentManager),
+      Effect.provideService(PresenceManagerTag, presenceManager),
       Effect.scoped
     );
 });
@@ -363,12 +506,13 @@ const handleConnectionWithDocumentId = (
 ): Effect.Effect<
   void,
   Socket.SocketError | MessageParseError,
-  MimicServerConfigTag | MimicAuthServiceTag | DocumentManagerTag | Scope.Scope
+  MimicServerConfigTag | MimicAuthServiceTag | DocumentManagerTag | PresenceManagerTag | Scope.Scope
 > =>
   Effect.gen(function* () {
     const config = yield* MimicServerConfigTag;
     const authService = yield* MimicAuthServiceTag;
     const documentManager = yield* DocumentManagerTag;
+    const presenceManager = yield* PresenceManagerTag;
 
     const connectionId = crypto.randomUUID();
 
@@ -379,12 +523,27 @@ const handleConnectionWithDocumentId = (
       authenticated: false,
     };
 
+    // Track if this connection has set presence (for cleanup)
+    let hasPresence = false;
+
     // Get the socket writer
     const write = yield* socket.writer;
 
     // Helper to send a message to the client
     const sendMessage = (message: ServerMessage) =>
       write(encodeServerMessage(message));
+
+    // Send presence snapshot after auth
+    const sendPresenceSnapshot = Effect.gen(function* () {
+      if (!config.presence) return;
+
+      const snapshot = yield* presenceManager.getSnapshot(documentId);
+      yield* sendMessage({
+        type: "presence_snapshot",
+        selfId: connectionId,
+        presences: snapshot.presences,
+      });
+    });
 
     // Handle authentication using the auth service
     const handleAuth = (token: string) =>
@@ -398,6 +557,9 @@ const handleConnectionWithDocumentId = (
             userId: result.userId,
           };
           yield* sendMessage({ type: "auth_result", success: true });
+
+          // Send presence snapshot after successful auth
+          yield* sendPresenceSnapshot;
         } else {
           yield* sendMessage({
             type: "auth_result",
@@ -406,6 +568,37 @@ const handleConnectionWithDocumentId = (
           });
         }
       });
+
+    // Handle presence set
+    const handlePresenceSet = (data: unknown) =>
+      Effect.gen(function* () {
+        if (!state.authenticated) return;
+        if (!config.presence) return;
+
+        // Validate presence data against schema
+        const validated = Presence.validateSafe(config.presence, data);
+        if (validated === undefined) {
+          yield* Effect.logWarning("Invalid presence data received", { connectionId, data });
+          return;
+        }
+
+        // Store in presence manager
+        yield* presenceManager.set(documentId, connectionId, {
+          data: validated,
+          userId: state.userId,
+        });
+
+        hasPresence = true;
+      });
+
+    // Handle presence clear
+    const handlePresenceClear = Effect.gen(function* () {
+      if (!state.authenticated) return;
+      if (!config.presence) return;
+
+      yield* presenceManager.remove(documentId, connectionId);
+      hasPresence = false;
+    });
 
     // Handle a client message
     const handleMessage = (message: ClientMessage) =>
@@ -448,6 +641,14 @@ const handleConnectionWithDocumentId = (
             const snapshot = yield* documentManager.getSnapshot(documentId);
             yield* sendMessage(snapshot);
             break;
+
+          case "presence_set":
+            yield* handlePresenceSet(message.data);
+            break;
+
+          case "presence_clear":
+            yield* handlePresenceClear;
+            break;
         }
       });
 
@@ -469,10 +670,54 @@ const handleConnectionWithDocumentId = (
       }).pipe(Effect.scoped)
     );
 
+    // Subscribe to presence events (if presence is enabled)
+    const presenceFiber = yield* Effect.fork(
+      Effect.gen(function* () {
+        if (!config.presence) return;
+
+        // Wait until authenticated before subscribing
+        while (!state.authenticated) {
+          yield* Effect.sleep(Duration.millis(100));
+        }
+
+        // Subscribe to presence events
+        const presenceStream = yield* presenceManager.subscribe(documentId);
+
+        // Forward presence events to the WebSocket, filtering out our own events (no-echo)
+        yield* Stream.runForEach(presenceStream, (event) =>
+          Effect.gen(function* () {
+            // Don't echo our own presence events
+            if (event.id === connectionId) return;
+
+            if (event.type === "presence_update") {
+              yield* sendMessage({
+                type: "presence_update",
+                id: event.id,
+                data: event.data,
+                userId: event.userId,
+              });
+            } else if (event.type === "presence_remove") {
+              yield* sendMessage({
+                type: "presence_remove",
+                id: event.id,
+              });
+            }
+          })
+        );
+      }).pipe(Effect.scoped)
+    );
+
     // Ensure cleanup on disconnect
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
+        // Interrupt the subscribe fibers
         yield* Fiber.interrupt(subscribeFiber);
+        yield* Fiber.interrupt(presenceFiber);
+
+        // Remove presence if we had any
+        if (hasPresence && config.presence) {
+          yield* presenceManager.remove(documentId, connectionId);
+        }
       })
     );
 

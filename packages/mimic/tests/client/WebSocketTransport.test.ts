@@ -755,4 +755,238 @@ describe("WebSocketTransport", () => {
       expect(transport.isConnected()).toBe(false);
     });
   });
+
+  describe("presence", () => {
+    describe("sendPresenceSet", () => {
+      it("should send presence_set message when connected", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+        });
+
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        transport.sendPresenceSet({ x: 100, y: 200, name: "Alice" });
+
+        // 2 messages: auth + presence_set
+        expect(ws.sentMessages.length).toBe(2);
+        const authMsg = JSON.parse(ws.sentMessages[0]!);
+        expect(authMsg.type).toBe("auth");
+        const sent = JSON.parse(ws.sentMessages[1]!);
+        expect(sent.type).toBe("presence_set");
+        expect(sent.data).toEqual({ x: 100, y: 200, name: "Alice" });
+      });
+
+      it("should queue presence_set during reconnection", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+          autoReconnect: true,
+        });
+
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        // Simulate connection lost
+        ws.simulateClose(1006, "Connection lost");
+
+        // Queue presence message during reconnection
+        transport.sendPresenceSet({ cursor: { x: 50, y: 75 } });
+
+        // Reconnect
+        vi.advanceTimersByTime(1000);
+        const newWs = MockWebSocket.getLatest()!;
+        await newWs.simulateOpenWithAuth();
+
+        // Queued message should be sent after auth
+        // 2 messages: auth + presence_set (queued message)
+        expect(newWs.sentMessages.length).toBe(2);
+        const authMsg = JSON.parse(newWs.sentMessages[0]!);
+        expect(authMsg.type).toBe("auth");
+        const sent = JSON.parse(newWs.sentMessages[1]!);
+        expect(sent.type).toBe("presence_set");
+        expect(sent.data).toEqual({ cursor: { x: 50, y: 75 } });
+      });
+
+      it("should not send when disconnected", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+        });
+
+        // Never connect - sendPresenceSet should be silently ignored
+        transport.sendPresenceSet({ x: 100, y: 200 });
+
+        // No WebSocket created, nothing sent
+        expect(MockWebSocket.instances.length).toBe(0);
+      });
+    });
+
+    describe("sendPresenceClear", () => {
+      it("should send presence_clear message when connected", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+        });
+
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        transport.sendPresenceClear();
+
+        // 2 messages: auth + presence_clear
+        expect(ws.sentMessages.length).toBe(2);
+        const authMsg = JSON.parse(ws.sentMessages[0]!);
+        expect(authMsg.type).toBe("auth");
+        const sent = JSON.parse(ws.sentMessages[1]!);
+        expect(sent.type).toBe("presence_clear");
+      });
+
+      it("should queue presence_clear during reconnection", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+          autoReconnect: true,
+        });
+
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        // Simulate connection lost
+        ws.simulateClose(1006, "Connection lost");
+
+        // Queue presence_clear during reconnection
+        transport.sendPresenceClear();
+
+        // Reconnect
+        vi.advanceTimersByTime(1000);
+        const newWs = MockWebSocket.getLatest()!;
+        await newWs.simulateOpenWithAuth();
+
+        // Queued message should be sent after auth
+        expect(newWs.sentMessages.length).toBe(2);
+        const sent = JSON.parse(newWs.sentMessages[1]!);
+        expect(sent.type).toBe("presence_clear");
+      });
+    });
+
+    describe("presence message forwarding", () => {
+      it("should forward presence_snapshot to subscribers", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+        });
+
+        const messages: Transport.ServerMessage[] = [];
+        transport.subscribe((msg) => messages.push(msg));
+
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        ws.simulateMessage({
+          type: "presence_snapshot",
+          selfId: "conn-123",
+          presences: {
+            "conn-456": { data: { x: 10, y: 20 }, userId: "user-456" },
+          },
+        });
+
+        expect(messages.length).toBe(1);
+        expect(messages[0]!.type).toBe("presence_snapshot");
+        if (messages[0]!.type === "presence_snapshot") {
+          expect(messages[0]!.selfId).toBe("conn-123");
+          expect(messages[0]!.presences["conn-456"]).toEqual({
+            data: { x: 10, y: 20 },
+            userId: "user-456",
+          });
+        }
+      });
+
+      it("should forward presence_update to subscribers", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+        });
+
+        const messages: Transport.ServerMessage[] = [];
+        transport.subscribe((msg) => messages.push(msg));
+
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        ws.simulateMessage({
+          type: "presence_update",
+          id: "conn-789",
+          data: { cursor: { x: 50, y: 100 } },
+          userId: "user-789",
+        });
+
+        expect(messages.length).toBe(1);
+        expect(messages[0]!.type).toBe("presence_update");
+        if (messages[0]!.type === "presence_update") {
+          expect(messages[0]!.id).toBe("conn-789");
+          expect(messages[0]!.data).toEqual({ cursor: { x: 50, y: 100 } });
+          expect(messages[0]!.userId).toBe("user-789");
+        }
+      });
+
+      it("should forward presence_remove to subscribers", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+        });
+
+        const messages: Transport.ServerMessage[] = [];
+        transport.subscribe((msg) => messages.push(msg));
+
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        ws.simulateMessage({
+          type: "presence_remove",
+          id: "conn-disconnected",
+        });
+
+        expect(messages.length).toBe(1);
+        expect(messages[0]!.type).toBe("presence_remove");
+        if (messages[0]!.type === "presence_remove") {
+          expect(messages[0]!.id).toBe("conn-disconnected");
+        }
+      });
+
+      it("should forward presence_update without userId", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+        });
+
+        const messages: Transport.ServerMessage[] = [];
+        transport.subscribe((msg) => messages.push(msg));
+
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        ws.simulateMessage({
+          type: "presence_update",
+          id: "conn-anon",
+          data: { status: "online" },
+        });
+
+        expect(messages.length).toBe(1);
+        if (messages[0]!.type === "presence_update") {
+          expect(messages[0]!.id).toBe("conn-anon");
+          expect(messages[0]!.data).toEqual({ status: "online" });
+          expect(messages[0]!.userId).toBeUndefined();
+        }
+      });
+    });
+  });
 });

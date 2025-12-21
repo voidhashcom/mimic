@@ -1,11 +1,18 @@
-import { ClientDocument, WebSocketTransport } from "@voidhash/mimic/client";
-import {MimicExampleSchema } from "@voidhash/mimic-example-shared";
+import { ClientDocument, WebSocketTransport, Presence } from "@voidhash/mimic/client";
+import { MimicExampleSchema, PresenceSchema } from "@voidhash/mimic-example-shared";
+import { Schema } from "effect";
 
-export const createDocument = (documentId: string) => ClientDocument.make({
+/**
+ * Create a ClientDocument with presence support.
+ */
+export const createDocument = (documentId: string, initialPresence?: Presence.Infer<typeof PresenceSchema>) =>
+  ClientDocument.make({
     debug: true,
     schema: MimicExampleSchema,
+    presence: PresenceSchema,
     transport: WebSocketTransport.make({
-        url: "ws://localhost:5001/mimic/todo",
-        documentId,
+      url: "ws://localhost:5001/mimic/todo",
+      documentId,
     }),
-});
+    initialPresence,
+  });
