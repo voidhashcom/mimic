@@ -20,6 +20,11 @@ jobs:
         with:
           node-version: 22.x
 
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          version: 10
+
       - run: npx changelogithub
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
@@ -63,8 +68,8 @@ jobs:
       - name: Publish to npm
         run: |
           # Publish all workspace packages
-          (cd packages/mimic && bun publish --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }})
-          (cd packages/mimic-effect && bun publish --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }})
-          (cd packages/mimic-react && bun publish --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }})
+          pnpm publish --workspace=packages/mimic --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
+          pnpm publish --workspace=packages/mimic-effect --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
+          pnpm publish --workspace=packages/mimic-react --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
