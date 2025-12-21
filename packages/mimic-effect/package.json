@@ -17,6 +17,8 @@
     "./MimicConfig": "./src/MimicConfig.ts"
   },
   "scripts": {
+    "build": "tsdown",
+    "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run -c vitest.mts"
   },
@@ -26,9 +28,10 @@
   "devDependencies": {
     "@effect/vitest": "^0.26.0",
     "@voidhash/tsconfig": "workspace:*",
+    "tsdown": "^0.18.2",
     "typescript": "5.8.3",
-    "vitest": "^3.2.4",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.2.4"
   },
   "peerDependencies": {
     "effect": "catalog:",
