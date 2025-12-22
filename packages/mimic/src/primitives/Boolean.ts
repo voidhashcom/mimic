@@ -87,7 +87,7 @@ export class BooleanPrimitive<TDefined extends boolean = false> implements Primi
       };
     },
 
-    applyOperation: (state: boolean | undefined, operation: Operation.Operation<any, any, any>): boolean => {
+    applyOperation: (_state: boolean | undefined, operation: Operation.Operation<any, any, any>): boolean => {
       if (operation.kind !== "boolean.set") {
         throw new ValidationError(`BooleanPrimitive cannot apply operation of kind: ${operation.kind}`);
       }

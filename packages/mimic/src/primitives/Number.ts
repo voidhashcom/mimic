@@ -128,7 +128,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
       };
     },
 
-    applyOperation: (state: number | undefined, operation: Operation.Operation<any, any, any>): number => {
+    applyOperation: (_state: number | undefined, operation: Operation.Operation<any, any, any>): number => {
       if (operation.kind !== "number.set") {
         throw new ValidationError(`NumberPrimitive cannot apply operation of kind: ${operation.kind}`);
       }

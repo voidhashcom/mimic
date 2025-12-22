@@ -19,7 +19,7 @@ export class MimicClientError extends Error {
  * Error thrown when a transaction is rejected by the server.
  */
 export class TransactionRejectedError extends MimicClientError {
-  readonly _tag = "TransactionRejectedError";
+  override readonly _tag = "TransactionRejectedError";
   readonly transaction: Transaction.Transaction;
   readonly reason: string;
 
@@ -35,7 +35,7 @@ export class TransactionRejectedError extends MimicClientError {
  * Error thrown when the transport is not connected.
  */
 export class NotConnectedError extends MimicClientError {
-  readonly _tag = "NotConnectedError";
+  override readonly _tag = "NotConnectedError";
   constructor() {
     super("Transport is not connected");
     this.name = "NotConnectedError";
@@ -46,8 +46,8 @@ export class NotConnectedError extends MimicClientError {
  * Error thrown when connection to the server fails.
  */
 export class ConnectionError extends MimicClientError {
-  readonly _tag = "ConnectionError";
-  readonly cause?: Error;
+  override readonly _tag = "ConnectionError";
+  override readonly cause?: Error;
 
   constructor(message: string, cause?: Error) {
     super(message);
@@ -60,7 +60,7 @@ export class ConnectionError extends MimicClientError {
  * Error thrown when state drift is detected and cannot be recovered.
  */
 export class StateDriftError extends MimicClientError {
-  readonly _tag = "StateDriftError";
+  override readonly _tag = "StateDriftError";
   readonly expectedVersion: number;
   readonly receivedVersion: number;
 
@@ -78,7 +78,7 @@ export class StateDriftError extends MimicClientError {
  * Error thrown when a pending transaction times out waiting for confirmation.
  */
 export class TransactionTimeoutError extends MimicClientError {
-  readonly _tag = "TransactionTimeoutError";
+  override readonly _tag = "TransactionTimeoutError";
   readonly transaction: Transaction.Transaction;
   readonly timeoutMs: number;
 
@@ -96,7 +96,7 @@ export class TransactionTimeoutError extends MimicClientError {
  * Error thrown when rebasing operations fails.
  */
 export class RebaseError extends MimicClientError {
-  readonly _tag = "RebaseError";
+  override readonly _tag = "RebaseError";
   readonly transactionId: string;
 
   constructor(transactionId: string, message: string) {
@@ -110,7 +110,7 @@ export class RebaseError extends MimicClientError {
  * Error thrown when the client document is in an invalid state.
  */
 export class InvalidStateError extends MimicClientError {
-  readonly _tag = "InvalidStateError";
+  override readonly _tag = "InvalidStateError";
   constructor(message: string) {
     super(message);
     this.name = "InvalidStateError";
@@ -121,7 +121,7 @@ export class InvalidStateError extends MimicClientError {
  * Error thrown when WebSocket connection or communication fails.
  */
 export class WebSocketError extends MimicClientError {
-  readonly _tag = "WebSocketError";
+  override readonly _tag = "WebSocketError";
   readonly code?: number;
   readonly reason?: string;
 
@@ -137,7 +137,7 @@ export class WebSocketError extends MimicClientError {
  * Error thrown when authentication fails.
  */
 export class AuthenticationError extends MimicClientError {
-  readonly _tag = "AuthenticationError";
+  override readonly _tag = "AuthenticationError";
   constructor(message: string) {
     super(message);
     this.name = "AuthenticationError";

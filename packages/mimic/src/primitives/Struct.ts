@@ -149,7 +149,7 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
 
       // Use a JavaScript Proxy to intercept field access
       return new globalThis.Proxy(base as StructProxy<TFields, TDefined>, {
-        get: (target, prop, receiver) => {
+        get: (target, prop, _receiver) => {
           // Return base methods (get, set, toSnapshot)
           if (prop === "get") {
             return target.get;
@@ -175,7 +175,7 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
 
           return undefined;
         },
-        has: (target, prop) => {
+        has: (_target, prop) => {
           if (prop === "get" || prop === "set" || prop === "toSnapshot") return true;
           if (typeof prop === "string" && prop in fields) return true;
           return false;

@@ -1,16 +1,19 @@
-import { Effect, Schema } from "effect";
-import * as OperationDefinition from "../OperationDefinition";
-import * as Operation from "../Operation";
-import * as OperationPath from "../OperationPath";
-import * as ProxyEnvironment from "../ProxyEnvironment";
-import * as Transform from "../Transform";
-import type { AnyPrimitive, InferState } from "../Primitive";
+import type { InferState } from "../Primitive";
 import { StructPrimitive } from "./Struct";
 
 /**
  * Symbol used to identify the Self placeholder
  */
 const TreeNodeSelfSymbol = Symbol.for("TreeNode.Self");
+
+/**
+ * Branded type for TreeNodeSelf - distinguishable at compile time
+ */
+declare const SelfBrand: unique symbol;
+export interface TreeNodeSelfType {
+  readonly _tag: "TreeNodeSelf";
+  readonly _brand: typeof SelfBrand;
+}
 
 /**
  * Special placeholder for self-referential tree nodes.
@@ -20,11 +23,11 @@ const TreeNodeSelfSymbol = Symbol.for("TreeNode.Self");
  * ```typescript
  * const FolderNode = TreeNode("folder", {
  *   data: Struct({ name: String() }),
- *   children: [Self], // Folder can contain other folders
+ *   children: [TreeNodeSelf], // Folder can contain other folders
  * });
  * ```
  */
-export const TreeNodeSelf = { _tag: "TreeNodeSelf", _symbol: TreeNodeSelfSymbol } as unknown as AnyTreeNodePrimitive;
+export const TreeNodeSelf: TreeNodeSelfType = { _tag: "TreeNodeSelf", _symbol: TreeNodeSelfSymbol } as unknown as TreeNodeSelfType;
 
 /**
  * Check if a value is the Self placeholder
@@ -34,40 +37,56 @@ const isSelf = (value: unknown): boolean => {
 };
 
 /**
- * The type for children - either a direct array or a lazy function (for self-referential nodes).
- * Using `Function` type allows self-references without explicit type annotations.
+ * Type utility to resolve Self placeholders to the actual node type
  */
-// eslint-disable-next-line @typescript-eslint/ban-types
-export type TreeNodeChildren = readonly AnyTreeNodePrimitive[] | Function;
+type ResolveSelf<T, TSelf extends AnyTreeNodePrimitive> = 
+  T extends TreeNodeSelfType ? TSelf : T;
+
+/**
+ * Type utility to resolve all children in a tuple, replacing Self with the node type
+ */
+type ResolveChildrenUnion<TChildren, TSelf extends AnyTreeNodePrimitive> = 
+  TChildren extends readonly (infer U)[] 
+    ? ResolveSelf<U, TSelf> 
+    : never;
+
+/**
+ * The type for children - either a direct array or a lazy function (for self-referential nodes).
+ */
+export type TreeNodeChildrenInput = readonly (AnyTreeNodePrimitive | TreeNodeSelfType)[] | (() => readonly (AnyTreeNodePrimitive | TreeNodeSelfType)[]);
 
 /**
  * Any TreeNodePrimitive type - used for generic constraints.
  */
-export type AnyTreeNodePrimitive = TreeNodePrimitive<string, StructPrimitive<any>>;
+export type AnyTreeNodePrimitive = TreeNodePrimitive<string, StructPrimitive<any>, any>;
 
 /**
  * Infer the data state type from a TreeNodePrimitive
  */
 export type InferTreeNodeDataState<T extends AnyTreeNodePrimitive> = 
-  T extends TreeNodePrimitive<any, infer TData> ? InferState<TData> : never;
+  T extends TreeNodePrimitive<any, infer TData, any> ? InferState<TData> : never;
 
 /**
  * Infer the type literal from a TreeNodePrimitive
  */
 export type InferTreeNodeType<T extends AnyTreeNodePrimitive> =
-  T extends TreeNodePrimitive<infer TType, any> ? TType : never;
+  T extends TreeNodePrimitive<infer TType, any, any> ? TType : never;
 
 /**
- * Infer the allowed children from a TreeNodePrimitive (resolved at runtime)
+ * Infer the allowed children from a TreeNodePrimitive
  */
-export type InferTreeNodeChildren<_T extends AnyTreeNodePrimitive> = AnyTreeNodePrimitive;
+export type InferTreeNodeChildren<T> = 
+  T extends TreeNodePrimitive<any, any, infer TChildren> ? TChildren : never;
 
 /**
  * Configuration for a TreeNode primitive
  */
-export interface TreeNodeConfig<TData extends StructPrimitive<any>> {
+export interface TreeNodeConfig<
+  TData extends StructPrimitive<any>,
+  TChildren extends readonly (AnyTreeNodePrimitive | TreeNodeSelfType)[]
+> {
   readonly data: TData;
-  readonly children: TreeNodeChildren;
+  readonly children: TChildren | (() => TChildren);
 }
 
 /**
@@ -75,18 +94,20 @@ export interface TreeNodeConfig<TData extends StructPrimitive<any>> {
  */
 export class TreeNodePrimitive<
   TType extends string,
-  TData extends StructPrimitive<any>
+  TData extends StructPrimitive<any>,
+  TChildren extends AnyTreeNodePrimitive = AnyTreeNodePrimitive
 > {
   readonly _tag = "TreeNodePrimitive" as const;
   readonly _Type!: TType;
   readonly _Data!: TData;
+  readonly _Children!: TChildren;
 
   private readonly _type: TType;
   private readonly _data: TData;
-  private readonly _children: TreeNodeChildren;
+  private readonly _children: TreeNodeChildrenInput;
   private _resolvedChildren: readonly AnyTreeNodePrimitive[] | undefined;
 
-  constructor(type: TType, config: TreeNodeConfig<TData>) {
+  constructor(type: TType, config: TreeNodeConfig<TData, readonly (AnyTreeNodePrimitive | TreeNodeSelfType)[]>) {
     this._type = type;
     this._data = config.data;
     this._children = config.children;
@@ -109,7 +130,7 @@ export class TreeNodePrimitive<
         ? (this._children as () => readonly AnyTreeNodePrimitive[])()
         : this._children;
       // Replace Self placeholders with this node
-      this._resolvedChildren = resolved.map(child => isSelf(child) ? this : child);
+      this._resolvedChildren = resolved.map(child => isSelf(child) ? this : child) as readonly AnyTreeNodePrimitive[];
     }
     return this._resolvedChildren;
   }
@@ -123,10 +144,11 @@ export class TreeNodePrimitive<
 /** Creates a new TreeNodePrimitive with the given type and config */
 export const TreeNode = <
   TType extends string,
-  TData extends StructPrimitive<any>
+  TData extends StructPrimitive<any>,
+  const TChildren extends readonly (AnyTreeNodePrimitive | TreeNodeSelfType)[]
 >(
   type: TType,
-  config: TreeNodeConfig<TData>
-): TreeNodePrimitive<TType, TData> =>
-  new TreeNodePrimitive(type, config);
+  config: TreeNodeConfig<TData, TChildren>
+): TreeNodePrimitive<TType, TData, ResolveChildrenUnion<TChildren, TreeNodePrimitive<TType, TData, any>>> =>
+  new TreeNodePrimitive(type, config) as TreeNodePrimitive<TType, TData, ResolveChildrenUnion<TChildren, TreeNodePrimitive<TType, TData, any>>>;
 

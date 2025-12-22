@@ -20,6 +20,7 @@ import { EditCardModal } from './EditCardModal'
 import { useKanban } from '../../context/KanbanContext'
 import type { Card as CardType, Column as ColumnType } from '../../types/kanban'
 import { useTodoStore } from '../../lib/store'
+import { useUndoRedo, useUndoRedoKeyboard } from '@voidhash/mimic-react/zustand-commander'
 
 export function KanbanBoard() {
   const { state, moveCard, reorderColumns } = useKanban()
@@ -27,6 +28,12 @@ export function KanbanBoard() {
   const [activeType, setActiveType] = useState<'card' | 'column' | null>(null)
   const [editingCard, setEditingCard] = useState<{ card: CardType; columnId: string } | null>(null)
   const { mimic } = useTodoStore()
+  
+  // Undo/Redo functionality
+  const { canUndo, canRedo, undo, redo, undoCount, redoCount } = useUndoRedo(useTodoStore)
+  
+  // Enable keyboard shortcuts (Ctrl/Cmd+Z for undo, Ctrl/Cmd+Shift+Z for redo)
+  useUndoRedoKeyboard(useTodoStore)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -186,27 +193,48 @@ export function KanbanBoard() {
     <div className="h-full flex flex-col">
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-row items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Kanban Board</h1>
-        <div className='flex flex-row items-center gap-2'>
+        <div className='flex flex-row items-center gap-4'>
+          {/* Undo/Redo buttons */}
+          <div className='flex flex-row items-center gap-1'>
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              className='px-3 py-1.5 text-sm font-medium rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+              title={`Undo (${undoCount})`}
+            >
+              ↶ Undo
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              className='px-3 py-1.5 text-sm font-medium rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+              title={`Redo (${redoCount})`}
+            >
+              Redo ↷
+            </button>
+          </div>
+          
+          {/* Connection status */}
           <div className='flex flex-row items-center gap-2'>
-            <div>
-            {
-              mimic.isConnected ? "Connected" : "Disconnected"
-            }
+            <div className={`px-2 py-1 text-xs rounded ${mimic.isConnected ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}`}>
+              {mimic.isConnected ? "Connected" : "Disconnected"}
             </div>
-            <div>
-            {
-              mimic.isReady ? "Ready" : "Not Ready"
-            }
+            <div className={`px-2 py-1 text-xs rounded ${mimic.isReady ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'}`}>
+              {mimic.isReady ? "Ready" : "Loading..."}
             </div>
           </div>
-          <div className='flex flex-row items-center -gap-2'>
-          {
-            Array.from(mimic.presence?.all.entries() ?? []).map(([id, entry]) => (
-              <div key={id} className='w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center text-gray-900 dark:text-gray-100'>
-                {entry.data.name?.slice(0, 1)}
+          
+          {/* Presence indicators */}
+          <div className='flex flex-row items-center -space-x-2'>
+            {Array.from(mimic.presence?.all.entries() ?? []).map(([id, entry]) => (
+              <div 
+                key={id} 
+                className='w-8 h-8 rounded-full bg-blue-500 dark:bg-blue-600 flex items-center justify-center text-white text-sm font-medium border-2 border-white dark:border-gray-900'
+                title={entry.data.name ?? `User ${id}`}
+              >
+                {entry.data.name?.slice(0, 1).toUpperCase() ?? '?'}
               </div>
-            ))
-          } 
+            ))}
           </div>
         </div>
       </div>

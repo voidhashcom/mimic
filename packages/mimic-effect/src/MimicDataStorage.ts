@@ -19,7 +19,7 @@ export class StorageLoadError extends Data.TaggedError("StorageLoadError")<{
   readonly documentId: string;
   readonly cause: unknown;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Failed to load document ${this.documentId}: ${String(this.cause)}`;
   }
 }
@@ -31,7 +31,7 @@ export class StorageSaveError extends Data.TaggedError("StorageSaveError")<{
   readonly documentId: string;
   readonly cause: unknown;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Failed to save document ${this.documentId}: ${String(this.cause)}`;
   }
 }
@@ -43,7 +43,7 @@ export class StorageDeleteError extends Data.TaggedError("StorageDeleteError")<{
   readonly documentId: string;
   readonly cause: unknown;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Failed to delete document ${this.documentId}: ${String(this.cause)}`;
   }
 }

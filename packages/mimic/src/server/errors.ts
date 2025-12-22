@@ -19,7 +19,7 @@ export class MimicServerError extends Error {
  * Error thrown when a transaction fails validation.
  */
 export class ValidationError extends MimicServerError {
-  readonly _tag = "ValidationError";
+  override readonly _tag = "ValidationError";
   readonly transactionId: string;
 
   constructor(transactionId: string, message: string) {
@@ -33,7 +33,7 @@ export class ValidationError extends MimicServerError {
  * Error thrown when an operation is invalid for the current schema.
  */
 export class InvalidOperationError extends MimicServerError {
-  readonly _tag = "InvalidOperationError";
+  override readonly _tag = "InvalidOperationError";
   readonly operationKind: string;
   readonly path: string;
 
@@ -49,9 +49,9 @@ export class InvalidOperationError extends MimicServerError {
  * Error thrown when an operation cannot be applied to the current state.
  */
 export class StateValidationError extends MimicServerError {
-  readonly _tag = "StateValidationError";
+  override readonly _tag = "StateValidationError";
   readonly transactionId: string;
-  readonly cause?: Error;
+  override readonly cause?: Error;
 
   constructor(transactionId: string, message: string, cause?: Error) {
     super(`Transaction ${transactionId} cannot be applied to current state: ${message}`);
@@ -65,7 +65,7 @@ export class StateValidationError extends MimicServerError {
  * Error thrown when attempting to apply an empty transaction.
  */
 export class EmptyTransactionError extends MimicServerError {
-  readonly _tag = "EmptyTransactionError";
+  override readonly _tag = "EmptyTransactionError";
   readonly transactionId: string;
 
   constructor(transactionId: string) {
@@ -79,7 +79,7 @@ export class EmptyTransactionError extends MimicServerError {
  * Error thrown when a duplicate transaction is submitted.
  */
 export class DuplicateTransactionError extends MimicServerError {
-  readonly _tag = "DuplicateTransactionError";
+  override readonly _tag = "DuplicateTransactionError";
   readonly transactionId: string;
 
   constructor(transactionId: string) {

@@ -147,7 +147,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
       };
     },
 
-    applyOperation: (state: string | undefined, operation: Operation.Operation<any, any, any>): string => {
+    applyOperation: (_state: string | undefined, operation: Operation.Operation<any, any, any>): string => {
       if (!isCompatibleOperation(operation, this._opDefinitions)) {
         throw new ValidationError(`StringPrimitive cannot apply operation of kind: ${operation.kind}`);
       }

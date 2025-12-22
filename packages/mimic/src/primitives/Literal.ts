@@ -88,7 +88,7 @@ export class LiteralPrimitive<T extends LiteralValue, TDefined extends boolean =
       };
     },
 
-    applyOperation: (state: T | undefined, operation: Operation.Operation<any, any, any>): T => {
+    applyOperation: (_state: T | undefined, operation: Operation.Operation<any, any, any>): T => {
       if (operation.kind !== "literal.set") {
         throw new ValidationError(`LiteralPrimitive cannot apply operation of kind: ${operation.kind}`);
       }

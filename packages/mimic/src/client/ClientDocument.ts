@@ -43,7 +43,7 @@ type InitState =
 /**
  * Listener for presence changes.
  */
-export interface PresenceListener<TData> {
+export interface PresenceListener<_TData> {
   /** Called when any presence changes (self or others) */
   readonly onPresenceChange?: () => void;
 }

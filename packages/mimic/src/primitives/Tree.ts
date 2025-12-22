@@ -37,7 +37,7 @@ export interface TypedTreeNodeState<TNode extends AnyTreeNodePrimitive> {
 /**
  * The state type for trees - a flat array of nodes
  */
-export type TreeState<TRoot extends AnyTreeNodePrimitive> = readonly TreeNodeState[];
+export type TreeState<_TRoot extends AnyTreeNodePrimitive> = readonly TreeNodeState[];
 
 /**
  * Helper to get children sorted by position
@@ -122,7 +122,7 @@ export interface TypedNodeProxy<TNode extends AnyTreeNodePrimitive> {
 /**
  * Node proxy with type narrowing capabilities
  */
-export interface TreeNodeProxyBase<TRoot extends AnyTreeNodePrimitive> {
+export interface TreeNodeProxyBase<_TRoot extends AnyTreeNodePrimitive> {
   /** The node ID */
   readonly id: string;
   /** The node type (string) */

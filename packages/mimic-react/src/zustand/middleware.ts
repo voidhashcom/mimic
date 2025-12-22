@@ -70,7 +70,7 @@ const createMimicObject = <
 const mimicImpl: MimicMiddlewareImpl = <
   TSchema extends Primitive.AnyPrimitive,
   TPresence extends Presence.AnyPresence | undefined = undefined,
-  T extends object = object
+  _T extends object = object
 >(
   document: ClientDocument.ClientDocument<TSchema, TPresence>,
   config: any,

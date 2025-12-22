@@ -33,7 +33,7 @@ export type InferUnionSnapshot<TVariants extends UnionVariants> = {
 /**
  * Proxy for accessing union variants
  */
-export interface UnionProxy<TVariants extends UnionVariants, TDiscriminator extends string, TDefined extends boolean = false> {
+export interface UnionProxy<TVariants extends UnionVariants, _TDiscriminator extends string, TDefined extends boolean = false> {
   /** Gets the current union value */
   get(): MaybeUndefined<InferUnionState<TVariants>, TDefined>;
   

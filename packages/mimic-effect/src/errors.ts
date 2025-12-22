@@ -16,7 +16,7 @@ export class DocumentTypeNotFoundError extends Data.TaggedError(
 )<{
   readonly documentType: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Document type not found: ${this.documentType}`;
   }
 }
@@ -29,7 +29,7 @@ export class DocumentNotFoundError extends Data.TaggedError(
 )<{
   readonly documentId: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Document not found: ${this.documentId}`;
   }
 }
@@ -42,7 +42,7 @@ export class AuthenticationError extends Data.TaggedError(
 )<{
   readonly reason: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Authentication failed: ${this.reason}`;
   }
 }
@@ -56,7 +56,7 @@ export class TransactionRejectedError extends Data.TaggedError(
   readonly transactionId: string;
   readonly reason: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Transaction ${this.transactionId} rejected: ${this.reason}`;
   }
 }
@@ -67,7 +67,7 @@ export class TransactionRejectedError extends Data.TaggedError(
 export class MessageParseError extends Data.TaggedError("MessageParseError")<{
   readonly cause: unknown;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Failed to parse message: ${String(this.cause)}`;
   }
 }
@@ -80,7 +80,7 @@ export class InvalidConnectionError extends Data.TaggedError(
 )<{
   readonly reason: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Invalid connection: ${this.reason}`;
   }
 }
@@ -93,7 +93,7 @@ export class MissingDocumentIdError extends Data.TaggedError(
 )<{
   readonly path?: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return this.path 
       ? `Document ID is required in the URL path: ${this.path}`
       : "Document ID is required in the URL path";

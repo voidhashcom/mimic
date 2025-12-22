@@ -6,7 +6,7 @@ export const CardNode = Primitive.TreeNode("card", {
         title: Primitive.String().min(1).max(34),
         description: Primitive.String(),
     }),
-    children: [],
+    children: [Primitive.TreeNodeSelf],
 });
 
 export const ColumnNode = Primitive.TreeNode("column", {
