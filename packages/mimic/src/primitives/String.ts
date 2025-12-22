@@ -26,10 +26,12 @@ interface StringPrimitiveSchema {
   readonly validators: readonly Validator<string>[];
 }
 
-export class StringPrimitive<TDefined extends boolean = false> implements Primitive<string, StringProxy<TDefined>> {
+export class StringPrimitive<TDefined extends boolean = false, THasDefault extends boolean = false> implements Primitive<string, StringProxy<TDefined>, TDefined, THasDefault> {
   readonly _tag = "StringPrimitive" as const;
   readonly _State!: string;
   readonly _Proxy!: StringProxy<TDefined>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: StringPrimitiveSchema;
 
@@ -47,7 +49,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Mark this string as required */
-  required(): StringPrimitive<true> {
+  required(): StringPrimitive<true, THasDefault> {
     return new StringPrimitive({
       ...this._schema,
       required: true,
@@ -55,7 +57,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Set a default value for this string */
-  default(defaultValue: string): StringPrimitive<true> {
+  default(defaultValue: string): StringPrimitive<true, true> {
     return new StringPrimitive({
       ...this._schema,
       defaultValue,
@@ -63,7 +65,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: string) => boolean, message: string): StringPrimitive<TDefined> {
+  refine(fn: (value: string) => boolean, message: string): StringPrimitive<TDefined, THasDefault> {
     return new StringPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -71,7 +73,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Minimum string length */
-  min(length: number): StringPrimitive<TDefined> {
+  min(length: number): StringPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => v.length >= length,
       `String must be at least ${length} characters`
@@ -79,7 +81,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Maximum string length */
-  max(length: number): StringPrimitive<TDefined> {
+  max(length: number): StringPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => v.length <= length,
       `String must be at most ${length} characters`
@@ -87,7 +89,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Exact string length */
-  length(exact: number): StringPrimitive<TDefined> {
+  length(exact: number): StringPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => v.length === exact,
       `String must be exactly ${exact} characters`
@@ -95,7 +97,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Match a regex pattern */
-  regex(pattern: RegExp, message?: string): StringPrimitive<TDefined> {
+  regex(pattern: RegExp, message?: string): StringPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => pattern.test(v),
       message ?? `String must match pattern ${pattern}`
@@ -103,7 +105,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Validate as email format */
-  email(): StringPrimitive<TDefined> {
+  email(): StringPrimitive<TDefined, THasDefault> {
     // Simple email regex - covers most common cases
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return this.refine(
@@ -113,7 +115,7 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Validate as URL format */
-  url(): StringPrimitive<TDefined> {
+  url(): StringPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => {
         try {
@@ -184,6 +186,6 @@ export class StringPrimitive<TDefined extends boolean = false> implements Primit
 }
 
 /** Creates a new StringPrimitive */
-export const String = (): StringPrimitive<false> =>
+export const String = (): StringPrimitive<false, false> =>
   new StringPrimitive({ required: false, defaultValue: undefined, validators: [] });
 

@@ -27,10 +27,12 @@ interface LiteralPrimitiveSchema<T extends LiteralValue> {
   readonly literal: T;
 }
 
-export class LiteralPrimitive<T extends LiteralValue, TDefined extends boolean = false> implements Primitive<T, LiteralProxy<T, TDefined>> {
+export class LiteralPrimitive<T extends LiteralValue, TDefined extends boolean = false, THasDefault extends boolean = false> implements Primitive<T, LiteralProxy<T, TDefined>, TDefined, THasDefault> {
   readonly _tag = "LiteralPrimitive" as const;
   readonly _State!: T;
   readonly _Proxy!: LiteralProxy<T, TDefined>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: LiteralPrimitiveSchema<T>;
 
@@ -48,7 +50,7 @@ export class LiteralPrimitive<T extends LiteralValue, TDefined extends boolean =
   }
 
   /** Mark this literal as required */
-  required(): LiteralPrimitive<T, true> {
+  required(): LiteralPrimitive<T, true, THasDefault> {
     return new LiteralPrimitive({
       ...this._schema,
       required: true,
@@ -56,7 +58,7 @@ export class LiteralPrimitive<T extends LiteralValue, TDefined extends boolean =
   }
 
   /** Set a default value for this literal */
-  default(defaultValue: T): LiteralPrimitive<T, true> {
+  default(defaultValue: T): LiteralPrimitive<T, true, true> {
     return new LiteralPrimitive({
       ...this._schema,
       defaultValue,
@@ -123,6 +125,6 @@ export class LiteralPrimitive<T extends LiteralValue, TDefined extends boolean =
 }
 
 /** Creates a new LiteralPrimitive with the given literal value */
-export const Literal = <T extends LiteralValue>(literal: T): LiteralPrimitive<T, false> =>
+export const Literal = <T extends LiteralValue>(literal: T): LiteralPrimitive<T, false, false> =>
   new LiteralPrimitive({ required: false, defaultValue: undefined, literal });
 

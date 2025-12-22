@@ -66,6 +66,46 @@ describe("StructPrimitive", () => {
       expect(operations[0]!.payload).toEqual({ name: "Alice", age: "30" });
     });
 
+    it("set() only requires fields that are required and without defaults", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required().default("John Doe"),
+        age: Primitive.Number().required(),
+        email: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+      proxy.set({ age: 30 });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+      expect(operations[0]!.payload).toEqual({ name: "John Doe", age: 30, email: undefined });
+    });
+
+    it("set() only requires fields that are required and without defaults", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        age: Primitive.Number().required(),
+        email: Primitive.String(),
+      }).default({ name: "John Doe" });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+      proxy.set({ age: 30 });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+      expect(operations[0]!.payload).toEqual({ name: "John Doe", age: 30, email: undefined });
+    });
+
     it("multiple field sets generate separate operations", () => {
       const operations: Operation.Operation<any, any, any>[] = [];
       const env = ProxyEnvironment.make((op) => {
@@ -302,6 +342,216 @@ describe("StructPrimitive", () => {
       // Verify the proxy has the expected shape
       expect(typeof proxy.name.set).toBe("function");
       expect(typeof proxy.set).toBe("function");
+    });
+  });
+
+  describe("update", () => {
+    it("update() generates individual field operations", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        email: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.update({ name: "John" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.payload).toBe("John");
+      expect(operations[0]!.path.toTokens()).toEqual(["name"]);
+    });
+
+    it("update() with multiple fields generates multiple operations", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        firstName: Primitive.String(),
+        lastName: Primitive.String(),
+        email: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.update({ firstName: "John", lastName: "Doe" });
+
+      expect(operations).toHaveLength(2);
+      expect(operations.map((op) => op.payload)).toContain("John");
+      expect(operations.map((op) => op.payload)).toContain("Doe");
+    });
+
+    it("update() skips undefined values", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        email: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.update({ name: "John", email: undefined });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.payload).toBe("John");
+    });
+
+    it("update() recursively updates nested structs", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const addressPrimitive = Primitive.Struct({
+        street: Primitive.String(),
+        city: Primitive.String(),
+        zip: Primitive.String(),
+      });
+
+      const personPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        address: addressPrimitive,
+      });
+
+      const proxy = personPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      // Partial update of nested struct - only city should be updated
+      proxy.update({ address: { city: "New York" } });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.payload).toBe("New York");
+      expect(operations[0]!.path.toTokens()).toEqual(["address", "city"]);
+    });
+
+    it("update() handles deeply nested structs", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const coordsPrimitive = Primitive.Struct({
+        lat: Primitive.String(),
+        lng: Primitive.String(),
+      });
+
+      const locationPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        coords: coordsPrimitive,
+      });
+
+      const personPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        location: locationPrimitive,
+      });
+
+      const proxy = personPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.update({ location: { coords: { lat: "40.7128" } } });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.payload).toBe("40.7128");
+      expect(operations[0]!.path.toTokens()).toEqual(["location", "coords", "lat"]);
+    });
+
+    it("update() can update both nested and top-level fields", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const addressPrimitive = Primitive.Struct({
+        city: Primitive.String(),
+        zip: Primitive.String(),
+      });
+
+      const personPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        address: addressPrimitive,
+      });
+
+      const proxy = personPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.update({ name: "Jane", address: { city: "Boston" } });
+
+      expect(operations).toHaveLength(2);
+
+      const nameOp = operations.find((op) => op.path.toTokens().join("/") === "name");
+      const cityOp = operations.find((op) => op.path.toTokens().join("/") === "address/city");
+
+      expect(nameOp).toBeDefined();
+      expect(nameOp!.payload).toBe("Jane");
+
+      expect(cityOp).toBeDefined();
+      expect(cityOp!.payload).toBe("Boston");
+    });
+
+    it("update() with empty object generates no operations", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        email: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.update({});
+
+      expect(operations).toHaveLength(0);
+    });
+
+    it("update() ignores unknown fields", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      // Cast to any to bypass type checking for testing unknown fields
+      (proxy as any).update({ name: "John", unknownField: "value" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.payload).toBe("John");
+    });
+
+    it("update() with nested path prefix", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        email: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make("users/0"));
+
+      proxy.update({ name: "Updated" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.path.toTokens()).toEqual(["users", "0", "name"]);
     });
   });
 });

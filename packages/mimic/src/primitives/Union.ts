@@ -7,14 +7,14 @@ import * as Transform from "../Transform";
 import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, InferState, InferProxy, InferSnapshot } from "../Primitive";
 import { ValidationError } from "../Primitive";
 import { LiteralPrimitive } from "./Literal";
-import { StructPrimitive } from "./Struct";
-import { runValidators } from "./shared";
+import { StructPrimitive, InferStructState } from "./Struct";
+import { runValidators, applyDefaults, StructSetInput } from "./shared";
 
 
 /**
  * Type constraint for union variants - must be struct primitives
  */
-export type UnionVariants = Record<string, StructPrimitive<any, any>>;
+export type UnionVariants = Record<string, StructPrimitive<any, any, any>>;
 
 /**
  * Infer the union state type from variants
@@ -31,14 +31,24 @@ export type InferUnionSnapshot<TVariants extends UnionVariants> = {
 }[keyof TVariants];
 
 /**
+ * Compute the input type for union.set() operations.
+ * For each variant, uses StructSetInput to make fields with defaults optional.
+ */
+export type UnionSetInput<TVariants extends UnionVariants> = {
+  [K in keyof TVariants]: TVariants[K] extends StructPrimitive<infer TFields, any, any>
+    ? StructSetInput<TFields>
+    : InferState<TVariants[K]>;
+}[keyof TVariants];
+
+/**
  * Proxy for accessing union variants
  */
 export interface UnionProxy<TVariants extends UnionVariants, _TDiscriminator extends string, TDefined extends boolean = false> {
   /** Gets the current union value */
   get(): MaybeUndefined<InferUnionState<TVariants>, TDefined>;
   
-  /** Sets the entire union value */
-  set(value: InferUnionState<TVariants>): void;
+  /** Sets the entire union value (applies defaults for variant fields) */
+  set(value: UnionSetInput<TVariants>): void;
   
   /** Access a specific variant's proxy (assumes the variant is active) */
   as<K extends keyof TVariants>(variant: K): InferProxy<TVariants[K]>;
@@ -59,12 +69,14 @@ interface UnionPrimitiveSchema<TVariants extends UnionVariants, TDiscriminator e
   readonly variants: TVariants;
 }
 
-export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator extends string = "type", TDefined extends boolean = false>
-  implements Primitive<InferUnionState<TVariants>, UnionProxy<TVariants, TDiscriminator, TDefined>>
+export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator extends string = "type", TDefined extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<InferUnionState<TVariants>, UnionProxy<TVariants, TDiscriminator, TDefined>, TDefined, THasDefault>
 {
   readonly _tag = "UnionPrimitive" as const;
   readonly _State!: InferUnionState<TVariants>;
   readonly _Proxy!: UnionProxy<TVariants, TDiscriminator, TDefined>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: UnionPrimitiveSchema<TVariants, TDiscriminator>;
 
@@ -82,7 +94,7 @@ export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator exte
   }
 
   /** Mark this union as required */
-  required(): UnionPrimitive<TVariants, TDiscriminator, true> {
+  required(): UnionPrimitive<TVariants, TDiscriminator, true, THasDefault> {
     return new UnionPrimitive({
       ...this._schema,
       required: true,
@@ -90,10 +102,12 @@ export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator exte
   }
 
   /** Set a default value for this union */
-  default(defaultValue: InferUnionState<TVariants>): UnionPrimitive<TVariants, TDiscriminator, true> {
+  default(defaultValue: UnionSetInput<TVariants>): UnionPrimitive<TVariants, TDiscriminator, true, true> {
+    // Apply defaults to the variant
+    const merged = this._applyVariantDefaults(defaultValue as Partial<InferUnionState<TVariants>>);
     return new UnionPrimitive({
       ...this._schema,
-      defaultValue,
+      defaultValue: merged,
     });
   }
 
@@ -119,13 +133,24 @@ export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator exte
       const variant = this._schema.variants[key]!;
       const discriminatorField = variant.fields[this._schema.discriminator];
       if (discriminatorField && discriminatorField._tag === "LiteralPrimitive") {
-        const literalPrimitive = discriminatorField as LiteralPrimitive<any, any>;
+        const literalPrimitive = discriminatorField as LiteralPrimitive<any, any, any>;
         if (literalPrimitive.literal === discriminatorValue) {
           return key;
         }
       }
     }
     return undefined;
+  }
+
+  /** Apply defaults to a variant value based on the discriminator */
+  private _applyVariantDefaults(value: Partial<InferUnionState<TVariants>>): InferUnionState<TVariants> {
+    const variantKey = this._findVariantKey(value as InferUnionState<TVariants>);
+    if (!variantKey) {
+      return value as InferUnionState<TVariants>;
+    }
+    
+    const variantPrimitive = this._schema.variants[variantKey]!;
+    return applyDefaults(variantPrimitive as AnyPrimitive, value) as InferUnionState<TVariants>;
   }
 
   readonly _internal: PrimitiveInternal<InferUnionState<TVariants>, UnionProxy<TVariants, TDiscriminator, TDefined>> = {
@@ -141,9 +166,11 @@ export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator exte
           const state = env.getState(operationPath) as InferUnionState<TVariants> | undefined;
           return (state ?? defaultValue) as MaybeUndefined<InferUnionState<TVariants>, TDefined>;
         },
-        set: (value: InferUnionState<TVariants>) => {
+        set: (value: UnionSetInput<TVariants>) => {
+          // Apply defaults for the variant
+          const merged = this._applyVariantDefaults(value as Partial<InferUnionState<TVariants>>);
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set, merged)
           );
         },
         as: <K extends keyof TVariants>(variant: K): InferProxy<TVariants[K]> => {
@@ -311,13 +338,13 @@ export interface UnionOptions<TVariants extends UnionVariants, TDiscriminator ex
 /** Creates a new UnionPrimitive with the given variants */
 export function Union<TVariants extends UnionVariants>(
   options: UnionOptions<TVariants, "type">
-): UnionPrimitive<TVariants, "type", false>;
+): UnionPrimitive<TVariants, "type", false, false>;
 export function Union<TVariants extends UnionVariants, TDiscriminator extends string>(
   options: UnionOptions<TVariants, TDiscriminator>
-): UnionPrimitive<TVariants, TDiscriminator, false>;
+): UnionPrimitive<TVariants, TDiscriminator, false, false>;
 export function Union<TVariants extends UnionVariants, TDiscriminator extends string = "type">(
   options: UnionOptions<TVariants, TDiscriminator>
-): UnionPrimitive<TVariants, TDiscriminator, false> {
+): UnionPrimitive<TVariants, TDiscriminator, false, false> {
   const discriminator = (options.discriminator ?? "type") as TDiscriminator;
   return new UnionPrimitive({
     required: false,

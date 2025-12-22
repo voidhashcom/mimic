@@ -24,10 +24,12 @@ interface NumberPrimitiveSchema {
   readonly validators: readonly Validator<number>[];
 }
 
-export class NumberPrimitive<TDefined extends boolean = false> implements Primitive<number, NumberProxy<TDefined>> {
+export class NumberPrimitive<TDefined extends boolean = false, THasDefault extends boolean = false> implements Primitive<number, NumberProxy<TDefined>, TDefined, THasDefault> {
   readonly _tag = "NumberPrimitive" as const;
   readonly _State!: number;
   readonly _Proxy!: NumberProxy<TDefined>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: NumberPrimitiveSchema;
 
@@ -45,7 +47,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Mark this number as required */
-  required(): NumberPrimitive<true> {
+  required(): NumberPrimitive<true, THasDefault> {
     return new NumberPrimitive({
       ...this._schema,
       required: true,
@@ -53,7 +55,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Set a default value for this number */
-  default(defaultValue: number): NumberPrimitive<true> {
+  default(defaultValue: number): NumberPrimitive<true, true> {
     return new NumberPrimitive({
       ...this._schema,
       defaultValue,
@@ -61,7 +63,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: number) => boolean, message: string): NumberPrimitive<TDefined> {
+  refine(fn: (value: number) => boolean, message: string): NumberPrimitive<TDefined, THasDefault> {
     return new NumberPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -69,7 +71,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Minimum value (inclusive) */
-  min(value: number): NumberPrimitive<TDefined> {
+  min(value: number): NumberPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => v >= value,
       `Number must be at least ${value}`
@@ -77,7 +79,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Maximum value (inclusive) */
-  max(value: number): NumberPrimitive<TDefined> {
+  max(value: number): NumberPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => v <= value,
       `Number must be at most ${value}`
@@ -85,7 +87,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Must be positive (> 0) */
-  positive(): NumberPrimitive<TDefined> {
+  positive(): NumberPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => v > 0,
       "Number must be positive"
@@ -93,7 +95,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Must be negative (< 0) */
-  negative(): NumberPrimitive<TDefined> {
+  negative(): NumberPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => v < 0,
       "Number must be negative"
@@ -101,7 +103,7 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
   }
 
   /** Must be an integer */
-  int(): NumberPrimitive<TDefined> {
+  int(): NumberPrimitive<TDefined, THasDefault> {
     return this.refine(
       (v) => globalThis.Number.isInteger(v),
       "Number must be an integer"
@@ -164,6 +166,6 @@ export class NumberPrimitive<TDefined extends boolean = false> implements Primit
 }
 
 /** Creates a new NumberPrimitive */
-export const Number = (): NumberPrimitive<false> =>
+export const Number = (): NumberPrimitive<false, false> =>
   new NumberPrimitive({ required: false, defaultValue: undefined, validators: [] });
 

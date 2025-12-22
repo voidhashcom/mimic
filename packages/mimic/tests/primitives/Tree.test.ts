@@ -460,6 +460,128 @@ describe("TreePrimitive", () => {
       expect(withDefault._internal.getInitialState()).toEqual(defaultState);
     });
   });
+
+  describe("proxy - partial update", () => {
+    it("update() on TypedNodeProxy updates only specified fields", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      // Use the update method via as()
+      const fileProxy = proxy.node("file1")!.as(FileNode);
+      fileProxy.update({ name: "UpdatedName" });
+
+      // Should generate only a string.set operation for the name field
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.path.toTokens()).toEqual(["file1", "name"]);
+      expect(operations[0]!.payload).toBe("UpdatedName");
+    });
+
+    it("update() preserves other fields when updating partial data", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      // Update only the size field
+      proxy.node("file1")!.as(FileNode).update({ size: 200 });
+
+      // Should generate only a number.set operation for the size field
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("number.set");
+      expect(operations[0]!.path.toTokens()).toEqual(["file1", "size"]);
+      expect(operations[0]!.payload).toBe(200);
+
+      // The name should remain unchanged in the state
+      const updatedState = proxy.get();
+      const file1 = updatedState.find(n => n.id === "file1");
+      expect(file1!.data).toEqual({ name: "File1", size: 200 });
+    });
+
+    it("update() handles multiple fields at once", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      // Update both name and size
+      proxy.node("file1")!.as(FileNode).update({ name: "NewFile", size: 500 });
+
+      // Should generate two operations
+      expect(operations).toHaveLength(2);
+      
+      // Verify both fields were updated
+      const updatedState = proxy.get();
+      const file1 = updatedState.find(n => n.id === "file1");
+      expect(file1!.data).toEqual({ name: "NewFile", size: 500 });
+    });
+
+    it("updateAt() provides convenient partial update by node id", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      // Use updateAt for convenience
+      proxy.updateAt("file1", FileNode, { name: "QuickUpdate" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.path.toTokens()).toEqual(["file1", "name"]);
+      expect(operations[0]!.payload).toBe("QuickUpdate");
+    });
+
+    it("updateAt() throws for wrong node type", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "file1", type: "file", parentId: null, pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      // Trying to update a file node as a folder should throw
+      expect(() => proxy.updateAt("file1", FolderNode, { name: "NewName" })).toThrow(
+        Primitive.ValidationError
+      );
+    });
+
+    it("updateAt() throws for non-existent node", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      const { env } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      expect(() => proxy.updateAt("nonexistent", FileNode, { name: "Name" })).toThrow(
+        Primitive.ValidationError
+      );
+    });
+
+    it("data.update() on at() proxy also works for partial updates", () => {
+      const initialState: Primitive.TreeState<typeof FolderNode> = [
+        { id: "root", type: "folder", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "file1", type: "file", parentId: "root", pos: "a0", data: { name: "File1", size: 100 } },
+      ];
+      const { env, operations } = createEnvWithState(initialState);
+      const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
+
+      // The at() method returns the data proxy which has update()
+      proxy.at("file1", FileNode).update({ size: 999 });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("number.set");
+      expect(operations[0]!.path.toTokens()).toEqual(["file1", "size"]);
+    });
+  });
 });
 
 // =============================================================================

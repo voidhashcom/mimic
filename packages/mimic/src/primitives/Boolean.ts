@@ -23,10 +23,12 @@ interface BooleanPrimitiveSchema {
   readonly validators: readonly Validator<boolean>[];
 }
 
-export class BooleanPrimitive<TDefined extends boolean = false> implements Primitive<boolean, BooleanProxy<TDefined>> {
+export class BooleanPrimitive<TDefined extends boolean = false, THasDefault extends boolean = false> implements Primitive<boolean, BooleanProxy<TDefined>, TDefined, THasDefault> {
   readonly _tag = "BooleanPrimitive" as const;
   readonly _State!: boolean;
   readonly _Proxy!: BooleanProxy<TDefined>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: BooleanPrimitiveSchema;
 
@@ -44,7 +46,7 @@ export class BooleanPrimitive<TDefined extends boolean = false> implements Primi
   }
 
   /** Mark this boolean as required */
-  required(): BooleanPrimitive<true> {
+  required(): BooleanPrimitive<true, THasDefault> {
     return new BooleanPrimitive({
       ...this._schema,
       required: true,
@@ -52,7 +54,7 @@ export class BooleanPrimitive<TDefined extends boolean = false> implements Primi
   }
 
   /** Set a default value for this boolean */
-  default(defaultValue: boolean): BooleanPrimitive<true> {
+  default(defaultValue: boolean): BooleanPrimitive<true, true> {
     return new BooleanPrimitive({
       ...this._schema,
       defaultValue,
@@ -60,7 +62,7 @@ export class BooleanPrimitive<TDefined extends boolean = false> implements Primi
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: boolean) => boolean, message: string): BooleanPrimitive<TDefined> {
+  refine(fn: (value: boolean) => boolean, message: string): BooleanPrimitive<TDefined, THasDefault> {
     return new BooleanPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -123,6 +125,6 @@ export class BooleanPrimitive<TDefined extends boolean = false> implements Primi
 }
 
 /** Creates a new BooleanPrimitive */
-export const Boolean = (): BooleanPrimitive<false> =>
+export const Boolean = (): BooleanPrimitive<false, false> =>
   new BooleanPrimitive({ required: false, defaultValue: undefined, validators: [] });
 

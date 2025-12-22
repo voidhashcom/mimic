@@ -11,11 +11,18 @@ import * as Transform from "../Transform";
 /**
  * Base interface that all primitives must implement.
  * Provides type inference helpers and internal operations.
+ * 
+ * @typeParam TState - The state type this primitive holds
+ * @typeParam TProxy - The proxy type for interacting with this primitive
+ * @typeParam TDefined - Whether the value is guaranteed to be defined (via required() or default())
+ * @typeParam THasDefault - Whether this primitive has a default value
  */
-export interface Primitive<TState, TProxy> {
+export interface Primitive<TState, TProxy, TDefined extends boolean = false, THasDefault extends boolean = false> {
     readonly _tag: string;
     readonly _State: TState;
     readonly _Proxy: TProxy;
+    readonly _TDefined: TDefined;
+    readonly _THasDefault: THasDefault;
     readonly _internal: PrimitiveInternal<TState, TProxy>;
   }
   
@@ -46,17 +53,17 @@ export interface Primitive<TState, TProxy> {
   /**
    * Any primitive type - used for generic constraints.
    */
-  export type AnyPrimitive = Primitive<any, any>;
+  export type AnyPrimitive = Primitive<any, any, any, any>;
   
   /**
    * Infer the state type from a primitive.
    */
-  export type InferState<T> = T extends Primitive<infer S, any> ? S : never;
+  export type InferState<T> = T extends Primitive<infer S, any, any, any> ? S : never;
   
   /**
    * Infer the proxy type from a primitive.
    */
-  export type InferProxy<T> = T extends Primitive<any, infer P> ? P : never;
+  export type InferProxy<T> = T extends Primitive<any, infer P, any, any> ? P : never;
   
   /**
    * Helper type to conditionally add undefined based on TDefined.
@@ -69,9 +76,48 @@ export interface Primitive<TState, TProxy> {
    * Infer the snapshot type from a primitive.
    * The snapshot is a readonly, type-safe structure suitable for rendering.
    */
-  export type InferSnapshot<T> = T extends Primitive<any, infer P>
+  export type InferSnapshot<T> = T extends Primitive<any, infer P, any, any>
     ? P extends { toSnapshot(): infer S } ? S : never
     : never;
+
+  /**
+   * Extract THasDefault from a primitive.
+   */
+  export type HasDefault<T> = T extends Primitive<any, any, any, infer H> ? H : false;
+
+  /**
+   * Extract TDefined from a primitive.
+   */
+  export type IsDefined<T> = T extends Primitive<any, any, infer D, any> ? D : false;
+
+  /**
+   * Determines if a field is required for set() operations.
+   * A field is required if: TDefined is true AND THasDefault is false
+   */
+  export type IsRequiredForSet<T> = T extends Primitive<any, any, true, false> ? true : false;
+
+  /**
+   * Extract keys of fields that are required for set() (required without default).
+   */
+  export type RequiredSetKeys<TFields extends Record<string, AnyPrimitive>> = {
+    [K in keyof TFields]: IsRequiredForSet<TFields[K]> extends true ? K : never;
+  }[keyof TFields];
+
+  /**
+   * Extract keys of fields that are optional for set() (has default OR not required).
+   */
+  export type OptionalSetKeys<TFields extends Record<string, AnyPrimitive>> = {
+    [K in keyof TFields]: IsRequiredForSet<TFields[K]> extends true ? never : K;
+  }[keyof TFields];
+
+  /**
+   * Compute the input type for set() operations on a struct.
+   * Required fields (required without default) must be provided.
+   * Optional fields (has default or not required) can be omitted.
+   */
+  export type StructSetInput<TFields extends Record<string, AnyPrimitive>> = 
+    { readonly [K in RequiredSetKeys<TFields>]: InferState<TFields[K]> } &
+    { readonly [K in OptionalSetKeys<TFields>]?: InferState<TFields[K]> };
   
   // =============================================================================
   // Validation Errors
@@ -118,5 +164,60 @@ export function runValidators<T>(value: T, validators: readonly { validate: (val
 export function isCompatibleOperation(operation: Operation.Operation<any, any, any>, operationDefinitions: Record<string, OperationDefinition.OperationDefinition<any, any, any>>) {
   const values = Object.values(operationDefinitions);
   return values.some(value => value.kind === operation.kind);
+}
+
+// =============================================================================
+// Default Value Utilities
+// =============================================================================
+
+/**
+ * Applies default values to a partial input, recursively handling nested structs.
+ * 
+ * Uses a two-layer approach:
+ * 1. First, get the struct's initial state (which includes struct-level defaults)
+ * 2. Then, layer the provided values on top
+ * 3. Finally, ensure nested structs are recursively processed
+ * 
+ * @param primitive - The primitive definition containing field information
+ * @param value - The partial value provided by the user
+ * @returns The value with defaults applied for missing fields
+ */
+export function applyDefaults<T extends AnyPrimitive>(
+  primitive: T,
+  value: Partial<InferState<T>>
+): InferState<T> {
+  // Only structs need default merging
+  if (primitive._tag === "StructPrimitive") {
+    const structPrimitive = primitive as unknown as { 
+      fields: Record<string, AnyPrimitive>;
+      _internal: { getInitialState: () => Record<string, unknown> | undefined };
+    };
+    
+    // Start with the struct's initial state (struct-level default or field defaults)
+    const structInitialState = structPrimitive._internal.getInitialState() ?? {};
+    
+    // Layer the provided values on top of initial state
+    const result: Record<string, unknown> = { ...structInitialState, ...value };
+    
+    for (const key in structPrimitive.fields) {
+      const fieldPrimitive = structPrimitive.fields[key]!;
+      
+      if (result[key] === undefined) {
+        // Field still not provided after merging - try individual field default
+        const fieldDefault = fieldPrimitive._internal.getInitialState();
+        if (fieldDefault !== undefined) {
+          result[key] = fieldDefault;
+        }
+      } else if (fieldPrimitive._tag === "StructPrimitive" && typeof result[key] === "object" && result[key] !== null) {
+        // Recursively apply defaults to nested structs
+        result[key] = applyDefaults(fieldPrimitive, result[key] as Partial<InferState<typeof fieldPrimitive>>);
+      }
+    }
+    
+    return result as InferState<T>;
+  }
+  
+  // For non-struct primitives, return the value as-is
+  return value as InferState<T>;
 }
 

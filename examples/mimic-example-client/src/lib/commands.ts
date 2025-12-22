@@ -57,7 +57,7 @@ export const addColumn = commander.undoableAction(
   (ctx, params) => {
     const { mimic } = ctx.getState();
     let newColumnId: string | undefined;
-
+    
     mimic.document.transaction((root) => {
       const rootNode = root.root();
       if (!rootNode) throw new Error("Tree has no root node");

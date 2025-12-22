@@ -7,7 +7,8 @@ import * as Transform from "../Transform";
 import * as FractionalIndex from "../FractionalIndex";
 import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator, InferState, InferProxy, InferSnapshot } from "../Primitive";
 import { ValidationError } from "../Primitive";
-import { runValidators } from "./shared";
+import { runValidators, applyDefaults, StructSetInput } from "./shared";
+import type { StructPrimitive } from "./Struct";
 
 
 /**
@@ -46,15 +47,25 @@ export interface ArrayEntrySnapshot<TElement extends AnyPrimitive> {
  */
 export type ArraySnapshot<TElement extends AnyPrimitive> = readonly ArrayEntrySnapshot<TElement>[];
 
+/**
+ * Compute the input type for array element values.
+ * If the element is a struct, uses StructSetInput (partial with defaults).
+ * Otherwise uses the full state type.
+ */
+export type ArrayElementSetInput<TElement extends AnyPrimitive> =
+  TElement extends StructPrimitive<infer TFields, any, any>
+    ? StructSetInput<TFields>
+    : InferState<TElement>;
+
 export interface ArrayProxy<TElement extends AnyPrimitive> {
   /** Gets the current array entries (sorted by position) */
   get(): ArrayState<TElement>;
-  /** Replaces the entire array with new values (generates new IDs and positions) */
-  set(values: readonly InferState<TElement>[]): void;
-  /** Appends a value to the end of the array */
-  push(value: InferState<TElement>): void;
-  /** Inserts a value at the specified visual index */
-  insertAt(index: number, value: InferState<TElement>): void;
+  /** Replaces the entire array with new values (generates new IDs and positions, applies defaults) */
+  set(values: readonly ArrayElementSetInput<TElement>[]): void;
+  /** Appends a value to the end of the array (applies defaults for struct elements) */
+  push(value: ArrayElementSetInput<TElement>): void;
+  /** Inserts a value at the specified visual index (applies defaults for struct elements) */
+  insertAt(index: number, value: ArrayElementSetInput<TElement>): void;
   /** Removes the element with the specified ID */
   remove(id: string): void;
   /** Moves an element to a new visual index */
@@ -77,12 +88,14 @@ interface ArrayPrimitiveSchema<TElement extends AnyPrimitive> {
   readonly validators: readonly Validator<ArrayState<TElement>>[];
 }
 
-export class ArrayPrimitive<TElement extends AnyPrimitive>
-  implements Primitive<ArrayState<TElement>, ArrayProxy<TElement>>
+export class ArrayPrimitive<TElement extends AnyPrimitive, TDefined extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<ArrayState<TElement>, ArrayProxy<TElement>, TDefined, THasDefault>
 {
   readonly _tag = "ArrayPrimitive" as const;
   readonly _State!: ArrayState<TElement>;
   readonly _Proxy!: ArrayProxy<TElement>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: ArrayPrimitiveSchema<TElement>;
 
@@ -118,7 +131,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
   }
 
   /** Mark this array as required */
-  required(): ArrayPrimitive<TElement> {
+  required(): ArrayPrimitive<TElement, true, THasDefault> {
     return new ArrayPrimitive({
       ...this._schema,
       required: true,
@@ -126,7 +139,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
   }
 
   /** Set a default value for this array */
-  default(defaultValue: ArrayState<TElement>): ArrayPrimitive<TElement> {
+  default(defaultValue: ArrayState<TElement>): ArrayPrimitive<TElement, true, true> {
     return new ArrayPrimitive({
       ...this._schema,
       defaultValue,
@@ -139,7 +152,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: ArrayState<TElement>) => boolean, message: string): ArrayPrimitive<TElement> {
+  refine(fn: (value: ArrayState<TElement>) => boolean, message: string): ArrayPrimitive<TElement, TDefined, THasDefault> {
     return new ArrayPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -147,7 +160,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
   }
 
   /** Minimum array length */
-  minLength(length: number): ArrayPrimitive<TElement> {
+  minLength(length: number): ArrayPrimitive<TElement, TDefined, THasDefault> {
     return this.refine(
       (v) => v.length >= length,
       `Array must have at least ${length} elements`
@@ -155,7 +168,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
   }
 
   /** Maximum array length */
-  maxLength(length: number): ArrayPrimitive<TElement> {
+  maxLength(length: number): ArrayPrimitive<TElement, TDefined, THasDefault> {
     return this.refine(
       (v) => v.length <= length,
       `Array must have at most ${length} elements`
@@ -173,12 +186,17 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
         return sortByPos(state);
       };
 
+      // Helper to apply defaults for element values
+      const applyElementDefaults = (value: ArrayElementSetInput<TElement>): InferState<TElement> => {
+        return applyDefaults(elementPrimitive, value as Partial<InferState<TElement>>) as InferState<TElement>;
+      };
+
       return {
         get: (): ArrayState<TElement> => {
           return getCurrentState();
         },
 
-        set: (values: readonly InferState<TElement>[]) => {
+        set: (values: readonly ArrayElementSetInput<TElement>[]) => {
           // Generate entries with new IDs and sequential positions
           const entries: ArrayEntry<InferState<TElement>>[] = [];
           let prevPos: string | null = null;
@@ -186,7 +204,9 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
           for (const value of values) {
             const id = env.generateId();
             const pos = generatePosBetween(prevPos, null);
-            entries.push({ id, pos, value });
+            // Apply defaults to element value
+            const mergedValue = applyElementDefaults(value);
+            entries.push({ id, pos, value: mergedValue });
             prevPos = pos;
           }
           
@@ -195,27 +215,31 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
           );
         },
 
-        push: (value: InferState<TElement>) => {
+        push: (value: ArrayElementSetInput<TElement>) => {
           const sorted = getCurrentState();
           const lastPos = sorted.length > 0 ? sorted[sorted.length - 1]!.pos : null;
           const id = env.generateId();
           const pos = generatePosBetween(lastPos, null);
+          // Apply defaults to element value
+          const mergedValue = applyElementDefaults(value);
           
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.insert, { id, pos, value })
+            Operation.fromDefinition(operationPath, this._opDefinitions.insert, { id, pos, value: mergedValue })
           );
         },
 
-        insertAt: (index: number, value: InferState<TElement>) => {
+        insertAt: (index: number, value: ArrayElementSetInput<TElement>) => {
           const sorted = getCurrentState();
           const leftPos = index > 0 && sorted[index - 1] ? sorted[index - 1]!.pos : null;
           const rightPos = index < sorted.length && sorted[index] ? sorted[index]!.pos : null;
           
           const id = env.generateId();
           const pos = generatePosBetween(leftPos, rightPos);
+          // Apply defaults to element value
+          const mergedValue = applyElementDefaults(value);
           
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.insert, { id, pos, value })
+            Operation.fromDefinition(operationPath, this._opDefinitions.insert, { id, pos, value: mergedValue })
           );
         },
 
@@ -452,6 +476,6 @@ export class ArrayPrimitive<TElement extends AnyPrimitive>
 }
 
 /** Creates a new ArrayPrimitive with the given element type */
-export const Array = <TElement extends AnyPrimitive>(element: TElement): ArrayPrimitive<TElement> =>
+export const Array = <TElement extends AnyPrimitive>(element: TElement): ArrayPrimitive<TElement, false, false> =>
   new ArrayPrimitive({ required: false, defaultValue: undefined, element, validators: [] });
 

@@ -5,11 +5,11 @@ import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
 import * as FractionalIndex from "../FractionalIndex";
-import type { Primitive, PrimitiveInternal, Validator, InferProxy } from "./shared";
-import { ValidationError } from "./shared";
+import type { Primitive, PrimitiveInternal, Validator, InferProxy, AnyPrimitive, StructSetInput } from "./shared";
+import { ValidationError, applyDefaults } from "./shared";
 import { runValidators } from "./shared";
 import type { AnyTreeNodePrimitive, InferTreeNodeType, InferTreeNodeDataState, InferTreeNodeChildren } from "./TreeNode";
-import { InferStructState } from "./Struct";
+import { InferStructState, StructUpdateValue, StructPrimitive } from "./Struct";
 
 
 /**
@@ -106,6 +106,23 @@ export type InferTreeSnapshot<T extends TreePrimitive<any>> =
   T extends TreePrimitive<infer TRoot> ? TreeNodeSnapshot<TRoot> : never;
 
 /**
+ * Helper type to infer the update value type from a TreeNode's data
+ */
+export type TreeNodeUpdateValue<TNode extends AnyTreeNodePrimitive> =
+  TNode["data"] extends StructPrimitive<infer TFields, any, any>
+    ? StructUpdateValue<TFields>
+    : never;
+
+/**
+ * Helper type to infer the input type for node data (with defaults applied).
+ * Uses StructSetInput for struct data, making fields with defaults optional.
+ */
+export type TreeNodeDataSetInput<TNode extends AnyTreeNodePrimitive> =
+  TNode["data"] extends StructPrimitive<infer TFields, any, any>
+    ? StructSetInput<TFields>
+    : InferTreeNodeDataState<TNode>;
+
+/**
  * Typed proxy for a specific node type - provides type-safe data access
  */
 export interface TypedNodeProxy<TNode extends AnyTreeNodePrimitive> {
@@ -117,6 +134,8 @@ export interface TypedNodeProxy<TNode extends AnyTreeNodePrimitive> {
   readonly data: InferProxy<TNode["data"]>;
   /** Get the raw node state */
   get(): TypedTreeNodeState<TNode>;
+  /** Updates only the specified data fields (partial update, handles nested structs recursively) */
+  update(value: TreeNodeUpdateValue<TNode>): void;
 }
 
 /**
@@ -158,40 +177,40 @@ export interface TreeProxy<TRoot extends AnyTreeNodePrimitive> {
   /** Gets a node proxy by ID with type narrowing capabilities */
   node(id: string): TreeNodeProxyBase<TRoot> | undefined;
   
-  /** Insert a new node as the first child */
+  /** Insert a new node as the first child (applies defaults for node data) */
   insertFirst<TNode extends AnyTreeNodePrimitive>(
     parentId: string | null,
     nodeType: TNode,
-    data: InferTreeNodeDataState<TNode>
+    data: TreeNodeDataSetInput<TNode>
   ): string;
   
-  /** Insert a new node as the last child */
+  /** Insert a new node as the last child (applies defaults for node data) */
   insertLast<TNode extends AnyTreeNodePrimitive>(
     parentId: string | null,
     nodeType: TNode,
-    data: InferTreeNodeDataState<TNode>
+    data: TreeNodeDataSetInput<TNode>
   ): string;
   
-  /** Insert a new node at a specific index among siblings */
+  /** Insert a new node at a specific index among siblings (applies defaults for node data) */
   insertAt<TNode extends AnyTreeNodePrimitive>(
     parentId: string | null,
     index: number,
     nodeType: TNode,
-    data: InferTreeNodeDataState<TNode>
+    data: TreeNodeDataSetInput<TNode>
   ): string;
   
-  /** Insert a new node after a sibling */
+  /** Insert a new node after a sibling (applies defaults for node data) */
   insertAfter<TNode extends AnyTreeNodePrimitive>(
     siblingId: string,
     nodeType: TNode,
-    data: InferTreeNodeDataState<TNode>
+    data: TreeNodeDataSetInput<TNode>
   ): string;
   
-  /** Insert a new node before a sibling */
+  /** Insert a new node before a sibling (applies defaults for node data) */
   insertBefore<TNode extends AnyTreeNodePrimitive>(
     siblingId: string,
     nodeType: TNode,
-    data: InferTreeNodeDataState<TNode>
+    data: TreeNodeDataSetInput<TNode>
   ): string;
   
   /** Remove a node and all its descendants */
@@ -218,6 +237,13 @@ export interface TreeProxy<TRoot extends AnyTreeNodePrimitive> {
     nodeType: TNode
   ): InferProxy<TNode["data"]>;
   
+  /** Updates only the specified data fields of a node (partial update) */
+  updateAt<TNode extends AnyTreeNodePrimitive>(
+    id: string,
+    nodeType: TNode,
+    value: TreeNodeUpdateValue<TNode>
+  ): void;
+  
   /** Convert tree to a nested snapshot for UI rendering */
   toSnapshot(): TreeNodeSnapshot<TRoot> | undefined;
 }
@@ -229,12 +255,14 @@ interface TreePrimitiveSchema<TRoot extends AnyTreeNodePrimitive> {
   readonly validators: readonly Validator<TreeState<TRoot>>[];
 }
 
-export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
-  implements Primitive<TreeState<TRoot>, TreeProxy<TRoot>>
+export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TDefined extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<TreeState<TRoot>, TreeProxy<TRoot>, TDefined, THasDefault>
 {
   readonly _tag = "TreePrimitive" as const;
   readonly _State!: TreeState<TRoot>;
   readonly _Proxy!: TreeProxy<TRoot>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: TreePrimitiveSchema<TRoot>;
   private _nodeTypeRegistry: Map<string, AnyTreeNodePrimitive> | undefined;
@@ -271,7 +299,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
   }
 
   /** Mark this tree as required */
-  required(): TreePrimitive<TRoot> {
+  required(): TreePrimitive<TRoot, true, THasDefault> {
     return new TreePrimitive({
       ...this._schema,
       required: true,
@@ -279,7 +307,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
   }
 
   /** Set a default value for this tree */
-  default(defaultValue: TreeState<TRoot>): TreePrimitive<TRoot> {
+  default(defaultValue: TreeState<TRoot>): TreePrimitive<TRoot, true, true> {
     return new TreePrimitive({
       ...this._schema,
       defaultValue,
@@ -292,7 +320,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: TreeState<TRoot>) => boolean, message: string): TreePrimitive<TRoot> {
+  refine(fn: (value: TreeState<TRoot>) => boolean, message: string): TreePrimitive<TRoot, TDefined, THasDefault> {
     return new TreePrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -404,11 +432,16 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
               );
             }
             const nodePath = operationPath.append(nodeState.id);
+            const dataProxy = nodeType.data._internal.createProxy(env, nodePath) as InferProxy<TNode["data"]>;
             return {
               id: nodeState.id,
               type: nodeType.type as InferTreeNodeType<TNode>,
-              data: nodeType.data._internal.createProxy(env, nodePath) as InferProxy<TNode["data"]>,
+              data: dataProxy,
               get: () => nodeState as TypedTreeNodeState<TNode>,
+              update: (value: TreeNodeUpdateValue<TNode>) => {
+                // Delegate to the data proxy's update method
+                (dataProxy as { update: (v: unknown) => void }).update(value);
+              },
             };
           },
           
@@ -474,7 +507,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
         insertFirst: <TNode extends AnyTreeNodePrimitive>(
           parentId: string | null,
           nodeType: TNode,
-          data: InferTreeNodeDataState<TNode>
+          data: TreeNodeDataSetInput<TNode>
         ): string => {
           const state = getCurrentState();
           const siblings = getOrderedChildren(state, parentId);
@@ -496,13 +529,16 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
             throw new ValidationError("Tree already has a root node");
           }
 
+          // Apply defaults to node data
+          const mergedData = applyDefaults(nodeType.data as AnyPrimitive, data as Partial<InferTreeNodeDataState<TNode>>) as InferTreeNodeDataState<TNode>;
+
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.insert, {
               id,
               type: nodeType.type,
               parentId,
               pos,
-              data,
+              data: mergedData,
             })
           );
 
@@ -512,7 +548,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
         insertLast: <TNode extends AnyTreeNodePrimitive>(
           parentId: string | null,
           nodeType: TNode,
-          data: InferTreeNodeDataState<TNode>
+          data: TreeNodeDataSetInput<TNode>
         ): string => {
           const state = getCurrentState();
           const siblings = getOrderedChildren(state, parentId);
@@ -534,13 +570,16 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
             throw new ValidationError("Tree already has a root node");
           }
 
+          // Apply defaults to node data
+          const mergedData = applyDefaults(nodeType.data as AnyPrimitive, data as Partial<InferTreeNodeDataState<TNode>>) as InferTreeNodeDataState<TNode>;
+
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.insert, {
               id,
               type: nodeType.type,
               parentId,
               pos,
-              data,
+              data: mergedData,
             })
           );
 
@@ -551,7 +590,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
           parentId: string | null,
           index: number,
           nodeType: TNode,
-          data: InferTreeNodeDataState<TNode>
+          data: TreeNodeDataSetInput<TNode>
         ): string => {
           const state = getCurrentState();
           const siblings = getOrderedChildren(state, parentId);
@@ -575,13 +614,16 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
             throw new ValidationError("Tree already has a root node");
           }
 
+          // Apply defaults to node data
+          const mergedData = applyDefaults(nodeType.data as AnyPrimitive, data as Partial<InferTreeNodeDataState<TNode>>) as InferTreeNodeDataState<TNode>;
+
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.insert, {
               id,
               type: nodeType.type,
               parentId,
               pos,
-              data,
+              data: mergedData,
             })
           );
 
@@ -591,7 +633,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
         insertAfter: <TNode extends AnyTreeNodePrimitive>(
           siblingId: string,
           nodeType: TNode,
-          data: InferTreeNodeDataState<TNode>
+          data: TreeNodeDataSetInput<TNode>
         ): string => {
           const state = getCurrentState();
           const sibling = state.find(n => n.id === siblingId);
@@ -610,13 +652,16 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
           const parentType = getParentType(parentId);
           this._validateChildType(parentType, nodeType.type);
 
+          // Apply defaults to node data
+          const mergedData = applyDefaults(nodeType.data as AnyPrimitive, data as Partial<InferTreeNodeDataState<TNode>>) as InferTreeNodeDataState<TNode>;
+
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.insert, {
               id,
               type: nodeType.type,
               parentId,
               pos,
-              data,
+              data: mergedData,
             })
           );
 
@@ -626,7 +671,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
         insertBefore: <TNode extends AnyTreeNodePrimitive>(
           siblingId: string,
           nodeType: TNode,
-          data: InferTreeNodeDataState<TNode>
+          data: TreeNodeDataSetInput<TNode>
         ): string => {
           const state = getCurrentState();
           const sibling = state.find(n => n.id === siblingId);
@@ -645,13 +690,16 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
           const parentType = getParentType(parentId);
           this._validateChildType(parentType, nodeType.type);
 
+          // Apply defaults to node data
+          const mergedData = applyDefaults(nodeType.data as AnyPrimitive, data as Partial<InferTreeNodeDataState<TNode>>) as InferTreeNodeDataState<TNode>;
+
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.insert, {
               id,
               type: nodeType.type,
               parentId,
               pos,
-              data,
+              data: mergedData,
             })
           );
 
@@ -890,6 +938,29 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive>
           return nodeType.data._internal.createProxy(env, nodePath) as InferProxy<TNode["data"]>;
         },
 
+        updateAt: <TNode extends AnyTreeNodePrimitive>(
+          id: string,
+          nodeType: TNode,
+          value: TreeNodeUpdateValue<TNode>
+        ): void => {
+          // Get the node to verify its type
+          const state = getCurrentState();
+          const node = state.find(n => n.id === id);
+          if (!node) {
+            throw new ValidationError(`Node not found: ${id}`);
+          }
+          if (node.type !== nodeType.type) {
+            throw new ValidationError(
+              `Node is of type "${node.type}", not "${nodeType.type}"`
+            );
+          }
+
+          const nodePath = operationPath.append(id);
+          const dataProxy = nodeType.data._internal.createProxy(env, nodePath);
+          // Delegate to the data proxy's update method
+          (dataProxy as { update: (v: unknown) => void }).update(value);
+        },
+
         toSnapshot: (): TreeNodeSnapshot<TRoot> | undefined => {
           const state = getCurrentState();
           const rootNode = state.find(n => n.parentId === null);
@@ -1111,7 +1182,7 @@ export interface TreeOptions<TRoot extends AnyTreeNodePrimitive> {
 /** Creates a new TreePrimitive with the given root node type */
 export const Tree = <TRoot extends AnyTreeNodePrimitive>(
   options: TreeOptions<TRoot>
-): TreePrimitive<TRoot> =>
+): TreePrimitive<TRoot, false, false> =>
   new TreePrimitive({
     required: false,
     defaultValue: undefined,

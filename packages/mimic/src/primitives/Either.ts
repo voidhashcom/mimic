@@ -19,10 +19,10 @@ import { LiteralPrimitive, LiteralValue } from "./Literal";
  * Scalar primitives that can be used as variants in Either
  */
 export type ScalarPrimitive =
-  | StringPrimitive<any>
-  | NumberPrimitive<any>
-  | BooleanPrimitive<any>
-  | LiteralPrimitive<any, any>;
+  | StringPrimitive<any, any>
+  | NumberPrimitive<any, any>
+  | BooleanPrimitive<any, any>
+  | LiteralPrimitive<any, any, any>;
 
 /**
  * Infer the union state type from a tuple of scalar primitives
@@ -69,12 +69,14 @@ interface EitherPrimitiveSchema<TVariants extends readonly ScalarPrimitive[]> {
   readonly variants: TVariants;
 }
 
-export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefined extends boolean = false>
-  implements Primitive<InferEitherState<TVariants>, EitherProxy<TVariants, TDefined>>
+export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefined extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<InferEitherState<TVariants>, EitherProxy<TVariants, TDefined>, TDefined, THasDefault>
 {
   readonly _tag = "EitherPrimitive" as const;
   readonly _State!: InferEitherState<TVariants>;
   readonly _Proxy!: EitherProxy<TVariants, TDefined>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: EitherPrimitiveSchema<TVariants>;
 
@@ -92,7 +94,7 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefi
   }
 
   /** Mark this either as required */
-  required(): EitherPrimitive<TVariants, true> {
+  required(): EitherPrimitive<TVariants, true, THasDefault> {
     return new EitherPrimitive({
       ...this._schema,
       required: true,
@@ -100,7 +102,7 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefi
   }
 
   /** Set a default value for this either */
-  default(defaultValue: InferEitherState<TVariants>): EitherPrimitive<TVariants, true> {
+  default(defaultValue: InferEitherState<TVariants>): EitherPrimitive<TVariants, true, true> {
     return new EitherPrimitive({
       ...this._schema,
       defaultValue,
@@ -121,7 +123,7 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefi
     // Check for literal matches first (they take priority)
     for (const variant of this._schema.variants) {
       if (variant._tag === "LiteralPrimitive") {
-        const literalVariant = variant as LiteralPrimitive<any, any>;
+        const literalVariant = variant as LiteralPrimitive<any, any, any>;
         if (value === literalVariant.literal) {
           return "literal";
         }
@@ -166,7 +168,7 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefi
     // Check for literal matches first (they take priority)
     for (const variant of this._schema.variants) {
       if (variant._tag === "LiteralPrimitive") {
-        const literalVariant = variant as LiteralPrimitive<any, any>;
+        const literalVariant = variant as LiteralPrimitive<any, any, any>;
         if (value === literalVariant.literal) {
           return variant;
         }
@@ -350,7 +352,7 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefi
  */
 export function Either<TVariants extends readonly ScalarPrimitive[]>(
   ...variants: TVariants
-): EitherPrimitive<TVariants, false> {
+): EitherPrimitive<TVariants, false, false> {
   if (variants.length === 0) {
     throw new ValidationError("Either requires at least one variant");
   }

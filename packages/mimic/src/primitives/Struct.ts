@@ -6,7 +6,7 @@ import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
 import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator, InferState, InferProxy, InferSnapshot } from "../Primitive";
 import { ValidationError } from "../Primitive";
-import { runValidators } from "./shared";
+import { runValidators, applyDefaults, StructSetInput } from "./shared";
 
 
 /**
@@ -26,6 +26,16 @@ export type InferStructSnapshot<TFields extends Record<string, AnyPrimitive>> = 
 };
 
 /**
+ * Maps a schema definition to a partial update type.
+ * For nested structs, allows recursive partial updates.
+ */
+export type StructUpdateValue<TFields extends Record<string, AnyPrimitive>> = {
+  readonly [K in keyof TFields]?: TFields[K] extends StructPrimitive<infer F, any>
+    ? StructUpdateValue<F> | InferState<TFields[K]>
+    : InferState<TFields[K]>;
+};
+
+/**
  * Maps a schema definition to its proxy type.
  * Provides nested field access + get()/set()/toSnapshot() methods for the whole struct.
  */
@@ -34,8 +44,10 @@ export type StructProxy<TFields extends Record<string, AnyPrimitive>, TDefined e
 } & {
   /** Gets the entire struct value */
   get(): MaybeUndefined<InferStructState<TFields>, TDefined>;
-  /** Sets the entire struct value */
-  set(value: InferStructState<TFields>): void;
+  /** Sets the entire struct value (only fields that are required without defaults must be provided) */
+  set(value: StructSetInput<TFields>): void;
+  /** Updates only the specified fields (partial update, handles nested structs recursively) */
+  update(value: StructUpdateValue<TFields>): void;
   /** Returns a readonly snapshot of the struct for rendering */
   toSnapshot(): MaybeUndefined<InferStructSnapshot<TFields>, TDefined>;
 };
@@ -47,12 +59,14 @@ interface StructPrimitiveSchema<TFields extends Record<string, AnyPrimitive>> {
   readonly validators: readonly Validator<InferStructState<TFields>>[];
 }
 
-export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefined extends boolean = false>
-  implements Primitive<InferStructState<TFields>, StructProxy<TFields, TDefined>>
+export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefined extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<InferStructState<TFields>, StructProxy<TFields, TDefined>, TDefined, THasDefault>
 {
   readonly _tag = "StructPrimitive" as const;
   readonly _State!: InferStructState<TFields>;
   readonly _Proxy!: StructProxy<TFields, TDefined>;
+  readonly _TDefined!: TDefined;
+  readonly _THasDefault!: THasDefault;
 
   private readonly _schema: StructPrimitiveSchema<TFields>;
 
@@ -70,7 +84,7 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
   }
 
   /** Mark this struct as required */
-  required(): StructPrimitive<TFields, true> {
+  required(): StructPrimitive<TFields, true, THasDefault> {
     return new StructPrimitive({
       ...this._schema,
       required: true,
@@ -78,10 +92,12 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
   }
 
   /** Set a default value for this struct */
-  default(defaultValue: InferStructState<TFields>): StructPrimitive<TFields, true> {
+  default(defaultValue: StructSetInput<TFields>): StructPrimitive<TFields, true, true> {
+    // Apply defaults to the provided value
+    const merged = applyDefaults(this as AnyPrimitive, defaultValue as Partial<InferStructState<TFields>>) as InferStructState<TFields>;
     return new StructPrimitive({
       ...this._schema,
-      defaultValue,
+      defaultValue: merged,
     });
   }
 
@@ -91,7 +107,7 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
   }
 
   /** Add a custom validation rule (useful for cross-field validation) */
-  refine(fn: (value: InferStructState<TFields>) => boolean, message: string): StructPrimitive<TFields, TDefined> {
+  refine(fn: (value: InferStructState<TFields>) => boolean, message: string): StructPrimitive<TFields, TDefined, THasDefault> {
     return new StructPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -130,16 +146,46 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
         return snapshot as InferStructSnapshot<TFields>;
       };
 
-      // Create the base object with get/set/toSnapshot methods
+      // Create the base object with get/set/update/toSnapshot methods
       const base = {
         get: (): MaybeUndefined<InferStructState<TFields>, TDefined> => {
           const state = env.getState(operationPath) as InferStructState<TFields> | undefined;
           return (state ?? defaultValue) as MaybeUndefined<InferStructState<TFields>, TDefined>;
         },
-        set: (value: InferStructState<TFields>) => {
+        set: (value: StructSetInput<TFields>) => {
+          // Apply defaults for missing fields
+          const merged = applyDefaults(this as AnyPrimitive, value as Partial<InferStructState<TFields>>) as InferStructState<TFields>;
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set, merged)
           );
+        },
+        update: (value: StructUpdateValue<TFields>) => {
+          for (const key in value) {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+              const fieldValue = value[key as keyof TFields];
+              if (fieldValue === undefined) continue; // Skip undefined values
+
+              const fieldPrimitive = fields[key as keyof TFields];
+              if (!fieldPrimitive) continue; // Skip unknown fields
+
+              const fieldPath = operationPath.append(key);
+              const fieldProxy = fieldPrimitive._internal.createProxy(env, fieldPath);
+
+              // Check if this is a nested struct and value is a plain object (partial update)
+              if (
+                fieldPrimitive._tag === "StructPrimitive" &&
+                typeof fieldValue === "object" &&
+                fieldValue !== null &&
+                !Array.isArray(fieldValue)
+              ) {
+                // Recursively update nested struct
+                (fieldProxy as { update: (v: unknown) => void }).update(fieldValue);
+              } else {
+                // Set the field value directly
+                (fieldProxy as { set: (v: unknown) => void }).set(fieldValue);
+              }
+            }
+          }
         },
         toSnapshot: (): MaybeUndefined<InferStructSnapshot<TFields>, TDefined> => {
           const snapshot = buildSnapshot();
@@ -150,12 +196,15 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
       // Use a JavaScript Proxy to intercept field access
       return new globalThis.Proxy(base as StructProxy<TFields, TDefined>, {
         get: (target, prop, _receiver) => {
-          // Return base methods (get, set, toSnapshot)
+          // Return base methods (get, set, update, toSnapshot)
           if (prop === "get") {
             return target.get;
           }
           if (prop === "set") {
             return target.set;
+          }
+          if (prop === "update") {
+            return target.update;
           }
           if (prop === "toSnapshot") {
             return target.toSnapshot;
@@ -176,7 +225,7 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
           return undefined;
         },
         has: (_target, prop) => {
-          if (prop === "get" || prop === "set" || prop === "toSnapshot") return true;
+          if (prop === "get" || prop === "set" || prop === "update" || prop === "toSnapshot") return true;
           if (typeof prop === "string" && prop in fields) return true;
           return false;
         },
@@ -343,6 +392,6 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
 /** Creates a new StructPrimitive with the given fields */
 export const Struct = <TFields extends Record<string, AnyPrimitive>>(
   fields: TFields
-): StructPrimitive<TFields, false> =>
+): StructPrimitive<TFields, false, false> =>
   new StructPrimitive({ required: false, defaultValue: undefined, fields, validators: [] });
 
