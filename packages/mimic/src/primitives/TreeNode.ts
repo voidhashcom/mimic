@@ -83,7 +83,7 @@ export class TreeNodePrimitive<
   }
 
   /** Get resolved children (resolves lazy thunk if needed) */
-  get children(): ResolveChildren<TChildren> {
+  get children(): readonly AnyTreeNodePrimitive[] {
     if (this._resolvedChildren === undefined) {
       if (typeof this._children === "function") {
         this._resolvedChildren = (this._children as () => readonly AnyTreeNodePrimitive[])();
@@ -91,7 +91,7 @@ export class TreeNodePrimitive<
         this._resolvedChildren = this._children as readonly AnyTreeNodePrimitive[];
       }
     }
-    return this._resolvedChildren as ResolveChildren<TChildren>;
+    return this._resolvedChildren;
   }
 
   /** Check if a child type is allowed */
