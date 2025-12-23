@@ -9,7 +9,7 @@ export const CardNode = Primitive.TreeNode("card", {
     children: [Primitive.TreeNodeSelf],
 });
 
-export type UpdateType = Primitive.TreeNodeUpdateValue<typeof CardNode>;
+export type UpdateType = Primitive.InferUpdateInput<typeof CardNode>;
 
 export const ColumnNode = Primitive.TreeNode("column", {
     data: Primitive.Struct({

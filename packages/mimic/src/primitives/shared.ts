@@ -69,13 +69,21 @@ export interface Primitive<TState, TProxy, TRequired extends boolean = false, TH
 
   /**
    * Infer the SetInput type from a primitive.
+   * Works with both Primitive interface types and types with a TSetInput property (like TreeNodePrimitive).
    */
-  export type InferSetInput<T> = T extends Primitive<any, any, any, any, infer S, any> ? S : never;
+  export type InferSetInput<T> = 
+    T extends Primitive<any, any, any, any, infer S, any> ? S : 
+    T extends { TSetInput: infer S } ? S : 
+    never;
 
   /**
    * Infer the UpdateInput type from a primitive.
+   * Works with both Primitive interface types and types with a TUpdateInput property (like TreeNodePrimitive).
    */
-  export type InferUpdateInput<T> = T extends Primitive<any, any, any, any, any, infer U> ? U : never;
+  export type InferUpdateInput<T> = 
+    T extends Primitive<any, any, any, any, any, infer U> ? U : 
+    T extends { TUpdateInput: infer U } ? U : 
+    never;
   
   /**
    * Helper type to conditionally add undefined based on TRequired and THasDefault.

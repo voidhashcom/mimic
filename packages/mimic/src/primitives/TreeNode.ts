@@ -1,4 +1,5 @@
 import type { InferState } from "../Primitive";
+import type { InferSetInput, InferUpdateInput } from "./shared";
 import { StructPrimitive } from "./Struct";
 
 /**
@@ -101,6 +102,11 @@ export class TreeNodePrimitive<
   readonly _Type!: TType;
   readonly _Data!: TData;
   readonly _Children!: TChildren;
+  
+  /** For InferSetInput compatibility - delegates to the data struct's set input type */
+  readonly TSetInput!: InferSetInput<TData>;
+  /** For InferUpdateInput compatibility - delegates to the data struct's update input type */
+  readonly TUpdateInput!: InferUpdateInput<TData>;
 
   private readonly _type: TType;
   private readonly _data: TData;
