@@ -9,6 +9,8 @@ export const CardNode = Primitive.TreeNode("card", {
     children: [Primitive.TreeNodeSelf],
 });
 
+export type UpdateType = Primitive.TreeNodeUpdateValue<typeof CardNode>;
+
 export const ColumnNode = Primitive.TreeNode("column", {
     data: Primitive.Struct({
         name: Primitive.String().min(1).max(34),

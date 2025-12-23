@@ -1,6 +1,6 @@
 {
   "name": "@voidhash/mimic-react",
-  "version": "0.0.1-alpha.7",
+  "version": "0.0.1-alpha.8",
   "type": "module",
   "repository": {
     "type": "git",
@@ -9,8 +9,21 @@
   },
   "main": "./src/index.ts",
   "exports": {
-    "./zustand": "./src/zustand/index.ts",
-    "./zustand-commander": "./src/zustand-commander/index.ts"
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts",
+      "require": "./dist/index.cjs"
+    },
+    "./zustand": {
+      "import": "./dist/zustand/index.mjs",
+      "types": "./dist/zustand/index.d.mts",
+      "require": "./dist/zustand/index.cjs"
+    },
+    "./zustand-commander": {
+      "import": "./dist/zustand-commander/index.mjs",
+      "types": "./dist/zustand-commander/index.d.mts",
+      "require": "./dist/zustand-commander/index.cjs"
+    }
   },
   "scripts": {
     "build": "tsdown",

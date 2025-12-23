@@ -1,6 +1,6 @@
 {
   "name": "@voidhash/mimic-effect",
-  "version": "0.0.1-alpha.7",
+  "version": "0.0.1-alpha.8",
   "type": "module",
   "repository": {
     "type": "git",
@@ -9,12 +9,11 @@
   },
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./DocumentManager": "./src/DocumentManager.ts",
-    "./DocumentProtocol": "./src/DocumentProtocol.ts",
-    "./WebSocketHandler": "./src/WebSocketHandler.ts",
-    "./MimicServer": "./src/MimicServer.ts",
-    "./MimicConfig": "./src/MimicConfig.ts"
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
   },
   "scripts": {
     "build": "tsdown",

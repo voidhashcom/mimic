@@ -1,6 +1,6 @@
 import { defineConfig } from "tsdown";
 
-export const input = ["./src/index.ts"];
+export const input = ["./src/index.ts", "./src/zustand/index.ts", "./src/zustand-commander/index.ts"];
 
 export default defineConfig({
 	target: ["es2017"],
