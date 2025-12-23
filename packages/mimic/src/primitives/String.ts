@@ -4,20 +4,26 @@ import * as Operation from "../Operation";
 import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
-import type { Primitive, PrimitiveInternal, MaybeUndefined, Validator } from "./shared";
+import type { Primitive, PrimitiveInternal, MaybeUndefined, Validator, NeedsValue } from "./shared";
 import { runValidators, isCompatibleOperation, ValidationError } from "./shared";
+
+
+type InferSetInput<TRequired extends boolean = false, THasDefault extends boolean = false> = NeedsValue<string, TRequired, THasDefault>
+type InferUpdateInput<TRequired extends boolean = false, THasDefault extends boolean = false> = NeedsValue<string, TRequired, THasDefault>
 
 // =============================================================================
 // String Primitive
 // =============================================================================
 
-export interface StringProxy<TDefined extends boolean = false> {
+export interface StringProxy<TRequired extends boolean = false, THasDefault extends boolean = false> {
   /** Gets the current string value */
-  get(): MaybeUndefined<string, TDefined>;
+  get(): MaybeUndefined<string, TRequired, THasDefault>;
   /** Sets the string value, generating a string.set operation */
-  set(value: string): void;
+  set(value: InferSetInput<TRequired, THasDefault>): void;
+  /** This is the same as set. Updates the string value, generating a string.set operation */
+  update(value: InferUpdateInput<TRequired, THasDefault>): void;
   /** Returns a readonly snapshot of the string value for rendering */
-  toSnapshot(): MaybeUndefined<string, TDefined>;
+  toSnapshot(): MaybeUndefined<string, TRequired, THasDefault>;
 }
 
 interface StringPrimitiveSchema {
@@ -26,12 +32,14 @@ interface StringPrimitiveSchema {
   readonly validators: readonly Validator<string>[];
 }
 
-export class StringPrimitive<TDefined extends boolean = false, THasDefault extends boolean = false> implements Primitive<string, StringProxy<TDefined>, TDefined, THasDefault> {
+export class StringPrimitive<TRequired extends boolean = false, THasDefault extends boolean = false> implements Primitive<string, StringProxy<TRequired, THasDefault>, TRequired, THasDefault, InferSetInput<TRequired, THasDefault>, InferUpdateInput<TRequired, THasDefault>> {
   readonly _tag = "StringPrimitive" as const;
   readonly _State!: string;
-  readonly _Proxy!: StringProxy<TDefined>;
-  readonly _TDefined!: TDefined;
+  readonly _Proxy!: StringProxy<TRequired, THasDefault>;
+  readonly _TRequired!: TRequired;
   readonly _THasDefault!: THasDefault;
+  readonly TUpdateInput!: InferUpdateInput<TRequired, THasDefault>;
+  readonly TSetInput!: InferSetInput<TRequired, THasDefault>;
 
   private readonly _schema: StringPrimitiveSchema;
 
@@ -57,7 +65,7 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Set a default value for this string */
-  default(defaultValue: string): StringPrimitive<true, true> {
+  default(defaultValue: string): StringPrimitive<TRequired, true> {
     return new StringPrimitive({
       ...this._schema,
       defaultValue,
@@ -65,7 +73,7 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: string) => boolean, message: string): StringPrimitive<TDefined, THasDefault> {
+  refine(fn: (value: string) => boolean, message: string): StringPrimitive<TRequired, THasDefault> {
     return new StringPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -73,7 +81,7 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Minimum string length */
-  min(length: number): StringPrimitive<TDefined, THasDefault> {
+  min(length: number): StringPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => v.length >= length,
       `String must be at least ${length} characters`
@@ -81,7 +89,7 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Maximum string length */
-  max(length: number): StringPrimitive<TDefined, THasDefault> {
+  max(length: number): StringPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => v.length <= length,
       `String must be at most ${length} characters`
@@ -89,7 +97,7 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Exact string length */
-  length(exact: number): StringPrimitive<TDefined, THasDefault> {
+  length(exact: number): StringPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => v.length === exact,
       `String must be exactly ${exact} characters`
@@ -97,7 +105,7 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Match a regex pattern */
-  regex(pattern: RegExp, message?: string): StringPrimitive<TDefined, THasDefault> {
+  regex(pattern: RegExp, message?: string): StringPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => pattern.test(v),
       message ?? `String must match pattern ${pattern}`
@@ -105,7 +113,7 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Validate as email format */
-  email(): StringPrimitive<TDefined, THasDefault> {
+  email(): StringPrimitive<TRequired, THasDefault> {
     // Simple email regex - covers most common cases
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return this.refine(
@@ -115,7 +123,7 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Validate as URL format */
-  url(): StringPrimitive<TDefined, THasDefault> {
+  url(): StringPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => {
         try {
@@ -129,22 +137,27 @@ export class StringPrimitive<TDefined extends boolean = false, THasDefault exten
     );
   }
 
-  readonly _internal: PrimitiveInternal<string, StringProxy<TDefined>> = {
-    createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): StringProxy<TDefined> => {
+  readonly _internal: PrimitiveInternal<string, StringProxy<TRequired, THasDefault>> = {
+    createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): StringProxy<TRequired, THasDefault> => {
       const defaultValue = this._schema.defaultValue;
       return {
-        get: (): MaybeUndefined<string, TDefined> => {
+        get: (): MaybeUndefined<string, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as string | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<string, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<string, TRequired, THasDefault>;
         },
-        set: (value: string) => {
+        set: (value: InferSetInput<TRequired, THasDefault>) => {
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
           );
         },
-        toSnapshot: (): MaybeUndefined<string, TDefined> => {
+        update: (value: InferUpdateInput<TRequired, THasDefault>) => {
+          env.addOperation(
+            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+          );
+        },
+        toSnapshot: (): MaybeUndefined<string, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as string | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<string, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<string, TRequired, THasDefault>;
         },
       };
     },

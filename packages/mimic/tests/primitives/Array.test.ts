@@ -411,6 +411,114 @@ describe("ArrayPrimitive", () => {
       expect(positions[1]! < positions[2]!).toBe(true);
     });
   });
+  describe("struct elements with defaults", () => {
+    // Define a struct element with required and optional fields
+    const TaskStruct = Primitive.Struct({
+      title: Primitive.String().required(),       // Must provide
+      priority: Primitive.Number().default(0),     // Has default, optional
+      completed: Primitive.Boolean().default(false), // Has default, optional
+    });
+
+    const taskArray = Primitive.Array(TaskStruct);
+
+    // Helper to create environment for task array
+    const createTaskEnv = (
+      state: Primitive.ArrayEntry<{ title: string; priority: number; completed: boolean }>[] = []
+    ): { env: ReturnType<typeof ProxyEnvironment.make>; operations: Operation.Operation<any, any, any>[] } => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      let currentState = [...state];
+      let idCounter = 0;
+
+      const env = ProxyEnvironment.make({
+        onOperation: (op) => {
+          operations.push(op);
+          if (op.kind === "array.insert") {
+            currentState.push(op.payload);
+          } else if (op.kind === "array.set") {
+            currentState = op.payload;
+          }
+        },
+        getState: () => currentState,
+        generateId: () => `task-${++idCounter}`,
+      });
+
+      return { env, operations };
+    };
+
+    it("push() only requires fields without defaults", () => {
+      const { env, operations } = createTaskEnv();
+      const proxy = taskArray._internal.createProxy(env, OperationPath.make(""));
+
+      // Only provide required 'title', priority and completed should use defaults
+      proxy.push({ title: "New Task" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("array.insert");
+
+      const payload = operations[0]!.payload as { value: { title: string; priority: number; completed: boolean } };
+      expect(payload.value.title).toBe("New Task");
+      expect(payload.value.priority).toBe(0); // Default value
+      expect(payload.value.completed).toBe(false); // Default value
+    });
+
+    it("push() allows overriding defaults", () => {
+      const { env, operations } = createTaskEnv();
+      const proxy = taskArray._internal.createProxy(env, OperationPath.make(""));
+
+      // Provide title and override priority, let completed use default
+      proxy.push({ title: "Important Task", priority: 10 });
+
+      const payload = operations[0]!.payload as { value: { title: string; priority: number; completed: boolean } };
+      expect(payload.value.title).toBe("Important Task");
+      expect(payload.value.priority).toBe(10); // Overridden
+      expect(payload.value.completed).toBe(false); // Default value
+    });
+
+    it("insertAt() applies defaults for omitted fields", () => {
+      const existingEntry = {
+        id: "existing",
+        pos: "a0",
+        value: { title: "Existing", priority: 5, completed: true },
+      };
+      const { env, operations } = createTaskEnv([existingEntry]);
+      const proxy = taskArray._internal.createProxy(env, OperationPath.make(""));
+
+      // Insert with only required field
+      proxy.insertAt(0, { title: "First Task" });
+
+      const payload = operations[0]!.payload as { value: { title: string; priority: number; completed: boolean } };
+      expect(payload.value.title).toBe("First Task");
+      expect(payload.value.priority).toBe(0); // Default
+      expect(payload.value.completed).toBe(false); // Default
+    });
+
+    it("set() applies defaults to each element", () => {
+      const { env, operations } = createTaskEnv();
+      const proxy = taskArray._internal.createProxy(env, OperationPath.make(""));
+
+      // Set array with items that only have required fields
+      proxy.set([
+        { title: "Task 1" },
+        { title: "Task 2", priority: 5 },
+        { title: "Task 3", completed: true },
+      ]);
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("array.set");
+
+      const entries = operations[0]!.payload as { value: { title: string; priority: number; completed: boolean } }[];
+      expect(entries).toHaveLength(3);
+
+      // First item: only title, defaults for others
+      expect(entries[0]!.value).toEqual({ title: "Task 1", priority: 0, completed: false });
+
+      // Second item: title and priority, default for completed
+      expect(entries[1]!.value).toEqual({ title: "Task 2", priority: 5, completed: false });
+
+      // Third item: title and completed, default for priority
+      expect(entries[2]!.value).toEqual({ title: "Task 3", priority: 0, completed: true });
+    });
+  });
 });
 
 // =============================================================================

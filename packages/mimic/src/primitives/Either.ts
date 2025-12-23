@@ -4,7 +4,7 @@ import * as Operation from "../Operation";
 import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
-import type { Primitive, PrimitiveInternal, MaybeUndefined, InferState } from "./shared";
+import type { Primitive, PrimitiveInternal, MaybeUndefined, InferState, NeedsValue } from "./shared";
 import { ValidationError } from "./shared";
 import { StringPrimitive } from "./String";
 import { NumberPrimitive } from "./Number";
@@ -14,6 +14,9 @@ import { LiteralPrimitive, LiteralValue } from "./Literal";
 // =============================================================================
 // Either Primitive - Simple Type Union
 // =============================================================================
+
+type InferSetInput<TVariants extends readonly ScalarPrimitive[], TRequired extends boolean = false, THasDefault extends boolean = false> = NeedsValue<InferEitherState<TVariants>, TRequired, THasDefault>
+type InferUpdateInput<TVariants extends readonly ScalarPrimitive[], TRequired extends boolean = false, THasDefault extends boolean = false> = NeedsValue<InferEitherState<TVariants>, TRequired, THasDefault>
 
 /**
  * Scalar primitives that can be used as variants in Either
@@ -49,18 +52,21 @@ export interface EitherMatchHandlers<R> {
 /**
  * Proxy for accessing Either values
  */
-export interface EitherProxy<TVariants extends readonly ScalarPrimitive[], TDefined extends boolean = false> {
+export interface EitherProxy<TVariants extends readonly ScalarPrimitive[], TRequired extends boolean = false, THasDefault extends boolean = false> {
   /** Gets the current value */
-  get(): MaybeUndefined<InferEitherState<TVariants>, TDefined>;
+  get(): MaybeUndefined<InferEitherState<TVariants>, TRequired, THasDefault>;
 
   /** Sets the value to any of the allowed variant types */
-  set(value: InferEitherState<TVariants>): void;
+  set(value: InferSetInput<TVariants, TRequired, THasDefault>): void;
+
+  /** This is the same as set. Updates the value, generating an either.set operation */
+  update(value: InferUpdateInput<TVariants, TRequired, THasDefault>): void;
 
   /** Pattern match on the value type */
   match<R>(handlers: EitherMatchHandlers<R>): R | undefined;
 
   /** Returns a readonly snapshot of the value for rendering */
-  toSnapshot(): MaybeUndefined<InferEitherSnapshot<TVariants>, TDefined>;
+  toSnapshot(): MaybeUndefined<InferEitherSnapshot<TVariants>, TRequired, THasDefault>;
 }
 
 interface EitherPrimitiveSchema<TVariants extends readonly ScalarPrimitive[]> {
@@ -69,14 +75,16 @@ interface EitherPrimitiveSchema<TVariants extends readonly ScalarPrimitive[]> {
   readonly variants: TVariants;
 }
 
-export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefined extends boolean = false, THasDefault extends boolean = false>
-  implements Primitive<InferEitherState<TVariants>, EitherProxy<TVariants, TDefined>, TDefined, THasDefault>
+export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TRequired extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<InferEitherState<TVariants>, EitherProxy<TVariants, TRequired, THasDefault>, TRequired, THasDefault, InferSetInput<TVariants, TRequired, THasDefault>, InferUpdateInput<TVariants, TRequired, THasDefault>>
 {
   readonly _tag = "EitherPrimitive" as const;
   readonly _State!: InferEitherState<TVariants>;
-  readonly _Proxy!: EitherProxy<TVariants, TDefined>;
-  readonly _TDefined!: TDefined;
+  readonly _Proxy!: EitherProxy<TVariants, TRequired, THasDefault>;
+  readonly _TRequired!: TRequired;
   readonly _THasDefault!: THasDefault;
+  readonly TUpdateInput!: InferUpdateInput<TVariants, TRequired, THasDefault>;
+  readonly TSetInput!: InferSetInput<TVariants, TRequired, THasDefault>;
 
   private readonly _schema: EitherPrimitiveSchema<TVariants>;
 
@@ -102,7 +110,7 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefi
   }
 
   /** Set a default value for this either */
-  default(defaultValue: InferEitherState<TVariants>): EitherPrimitive<TVariants, true, true> {
+  default(defaultValue: InferEitherState<TVariants>): EitherPrimitive<TVariants, TRequired, true> {
     return new EitherPrimitive({
       ...this._schema,
       defaultValue,
@@ -248,19 +256,24 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefi
     matchingVariant._internal.applyOperation(undefined, syntheticOp);
   }
 
-  readonly _internal: PrimitiveInternal<InferEitherState<TVariants>, EitherProxy<TVariants, TDefined>> = {
+  readonly _internal: PrimitiveInternal<InferEitherState<TVariants>, EitherProxy<TVariants, TRequired, THasDefault>> = {
     createProxy: (
       env: ProxyEnvironment.ProxyEnvironment,
       operationPath: OperationPath.OperationPath
-    ): EitherProxy<TVariants, TDefined> => {
+    ): EitherProxy<TVariants, TRequired, THasDefault> => {
       const defaultValue = this._schema.defaultValue;
 
       return {
-        get: (): MaybeUndefined<InferEitherState<TVariants>, TDefined> => {
+        get: (): MaybeUndefined<InferEitherState<TVariants>, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as InferEitherState<TVariants> | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<InferEitherState<TVariants>, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<InferEitherState<TVariants>, TRequired, THasDefault>;
         },
-        set: (value: InferEitherState<TVariants>) => {
+        set: (value: InferSetInput<TVariants, TRequired, THasDefault>) => {
+          env.addOperation(
+            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+          );
+        },
+        update: (value: InferUpdateInput<TVariants, TRequired, THasDefault>) => {
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
           );
@@ -286,9 +299,9 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TDefi
               return undefined;
           }
         },
-        toSnapshot: (): MaybeUndefined<InferEitherSnapshot<TVariants>, TDefined> => {
+        toSnapshot: (): MaybeUndefined<InferEitherSnapshot<TVariants>, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as InferEitherState<TVariants> | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<InferEitherSnapshot<TVariants>, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<InferEitherSnapshot<TVariants>, TRequired, THasDefault>;
         },
       };
     },

@@ -5,10 +5,10 @@ import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
 import * as FractionalIndex from "../FractionalIndex";
-import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator, InferState, InferProxy, InferSnapshot } from "../Primitive";
+import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator, InferState, InferProxy, InferSnapshot, InferSetInput } from "../Primitive";
 import { ValidationError } from "../Primitive";
-import { runValidators, applyDefaults, StructSetInput } from "./shared";
-import type { StructPrimitive } from "./Struct";
+import { runValidators, applyDefaults } from "./shared";
+import { StructPrimitive, StructSetInput } from "./Struct";
 
 
 /**
@@ -49,13 +49,16 @@ export type ArraySnapshot<TElement extends AnyPrimitive> = readonly ArrayEntrySn
 
 /**
  * Compute the input type for array element values.
- * If the element is a struct, uses StructSetInput (partial with defaults).
- * Otherwise uses the full state type.
+ * Uses StructSetInput directly for struct elements so that:
+ * - Fields that are required AND have no default must be provided
+ * - Fields that are optional OR have defaults can be omitted
+ * 
+ * For non-struct elements, falls back to InferSetInput.
  */
-export type ArrayElementSetInput<TElement extends AnyPrimitive> =
+export type ArrayElementSetInput<TElement extends AnyPrimitive> = 
   TElement extends StructPrimitive<infer TFields, any, any>
     ? StructSetInput<TFields>
-    : InferState<TElement>;
+    : InferSetInput<TElement>;
 
 export interface ArrayProxy<TElement extends AnyPrimitive> {
   /** Gets the current array entries (sorted by position) */
@@ -88,14 +91,22 @@ interface ArrayPrimitiveSchema<TElement extends AnyPrimitive> {
   readonly validators: readonly Validator<ArrayState<TElement>>[];
 }
 
-export class ArrayPrimitive<TElement extends AnyPrimitive, TDefined extends boolean = false, THasDefault extends boolean = false>
-  implements Primitive<ArrayState<TElement>, ArrayProxy<TElement>, TDefined, THasDefault>
+/** Input type for array set() - an array of element set inputs */
+export type ArraySetInput<TElement extends AnyPrimitive> = readonly ArrayElementSetInput<TElement>[];
+
+/** Input type for array update() - same as set() for arrays */
+export type ArrayUpdateInput<TElement extends AnyPrimitive> = readonly ArrayElementSetInput<TElement>[];
+
+export class ArrayPrimitive<TElement extends AnyPrimitive, TRequired extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<ArrayState<TElement>, ArrayProxy<TElement>, TRequired, THasDefault, ArraySetInput<TElement>, ArrayUpdateInput<TElement>>
 {
   readonly _tag = "ArrayPrimitive" as const;
   readonly _State!: ArrayState<TElement>;
   readonly _Proxy!: ArrayProxy<TElement>;
-  readonly _TDefined!: TDefined;
+  readonly _TRequired!: TRequired;
   readonly _THasDefault!: THasDefault;
+  readonly TSetInput!: ArraySetInput<TElement>;
+  readonly TUpdateInput!: ArrayUpdateInput<TElement>;
 
   private readonly _schema: ArrayPrimitiveSchema<TElement>;
 
@@ -139,7 +150,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive, TDefined extends bool
   }
 
   /** Set a default value for this array */
-  default(defaultValue: ArrayState<TElement>): ArrayPrimitive<TElement, true, true> {
+  default(defaultValue: ArrayState<TElement>): ArrayPrimitive<TElement, TRequired, true> {
     return new ArrayPrimitive({
       ...this._schema,
       defaultValue,
@@ -152,7 +163,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive, TDefined extends bool
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: ArrayState<TElement>) => boolean, message: string): ArrayPrimitive<TElement, TDefined, THasDefault> {
+  refine(fn: (value: ArrayState<TElement>) => boolean, message: string): ArrayPrimitive<TElement, TRequired, THasDefault> {
     return new ArrayPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -160,7 +171,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive, TDefined extends bool
   }
 
   /** Minimum array length */
-  minLength(length: number): ArrayPrimitive<TElement, TDefined, THasDefault> {
+  minLength(length: number): ArrayPrimitive<TElement, TRequired, THasDefault> {
     return this.refine(
       (v) => v.length >= length,
       `Array must have at least ${length} elements`
@@ -168,7 +179,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive, TDefined extends bool
   }
 
   /** Maximum array length */
-  maxLength(length: number): ArrayPrimitive<TElement, TDefined, THasDefault> {
+  maxLength(length: number): ArrayPrimitive<TElement, TRequired, THasDefault> {
     return this.refine(
       (v) => v.length <= length,
       `Array must have at most ${length} elements`

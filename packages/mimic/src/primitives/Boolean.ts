@@ -4,17 +4,22 @@ import * as Operation from "../Operation";
 import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
-import type { Primitive, PrimitiveInternal, MaybeUndefined, Validator } from "./shared";
+import type { Primitive, PrimitiveInternal, MaybeUndefined, Validator, NeedsValue } from "./shared";
 import { runValidators, isCompatibleOperation, ValidationError } from "./shared";
 
 
-export interface BooleanProxy<TDefined extends boolean = false> {
+type InferSetInput<TRequired extends boolean = false, THasDefault extends boolean = false> = NeedsValue<boolean, TRequired, THasDefault>
+type InferUpdateInput<TRequired extends boolean = false, THasDefault extends boolean = false> = NeedsValue<boolean, TRequired, THasDefault>
+
+export interface BooleanProxy<TRequired extends boolean = false, THasDefault extends boolean = false> {
   /** Gets the current boolean value */
-  get(): MaybeUndefined<boolean, TDefined>;
+  get(): MaybeUndefined<boolean, TRequired, THasDefault>;
   /** Sets the boolean value, generating a boolean.set operation */
-  set(value: boolean): void;
+  set(value: InferSetInput<TRequired, THasDefault>): void;
+  /** This is the same as set. Updates the boolean value, generating a boolean.set operation */
+  update(value: InferUpdateInput<TRequired, THasDefault>): void;
   /** Returns a readonly snapshot of the boolean value for rendering */
-  toSnapshot(): MaybeUndefined<boolean, TDefined>;
+  toSnapshot(): MaybeUndefined<boolean, TRequired, THasDefault>;
 }
 
 interface BooleanPrimitiveSchema {
@@ -23,12 +28,14 @@ interface BooleanPrimitiveSchema {
   readonly validators: readonly Validator<boolean>[];
 }
 
-export class BooleanPrimitive<TDefined extends boolean = false, THasDefault extends boolean = false> implements Primitive<boolean, BooleanProxy<TDefined>, TDefined, THasDefault> {
+export class BooleanPrimitive<TRequired extends boolean = false, THasDefault extends boolean = false> implements Primitive<boolean, BooleanProxy<TRequired, THasDefault>, TRequired, THasDefault, InferSetInput<TRequired, THasDefault>, InferUpdateInput<TRequired, THasDefault>> {
   readonly _tag = "BooleanPrimitive" as const;
   readonly _State!: boolean;
-  readonly _Proxy!: BooleanProxy<TDefined>;
-  readonly _TDefined!: TDefined;
+  readonly _Proxy!: BooleanProxy<TRequired, THasDefault>;
+  readonly _TRequired!: TRequired;
   readonly _THasDefault!: THasDefault;
+  readonly TUpdateInput!: InferUpdateInput<TRequired, THasDefault>;
+  readonly TSetInput!: InferSetInput<TRequired, THasDefault>;
 
   private readonly _schema: BooleanPrimitiveSchema;
 
@@ -54,7 +61,7 @@ export class BooleanPrimitive<TDefined extends boolean = false, THasDefault exte
   }
 
   /** Set a default value for this boolean */
-  default(defaultValue: boolean): BooleanPrimitive<true, true> {
+  default(defaultValue: boolean): BooleanPrimitive<TRequired, true> {
     return new BooleanPrimitive({
       ...this._schema,
       defaultValue,
@@ -62,29 +69,34 @@ export class BooleanPrimitive<TDefined extends boolean = false, THasDefault exte
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: boolean) => boolean, message: string): BooleanPrimitive<TDefined, THasDefault> {
+  refine(fn: (value: boolean) => boolean, message: string): BooleanPrimitive<TRequired, THasDefault> {
     return new BooleanPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
     });
   }
 
-  readonly _internal: PrimitiveInternal<boolean, BooleanProxy<TDefined>> = {
-    createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): BooleanProxy<TDefined> => {
+  readonly _internal: PrimitiveInternal<boolean, BooleanProxy<TRequired, THasDefault>> = {
+    createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): BooleanProxy<TRequired, THasDefault> => {
       const defaultValue = this._schema.defaultValue;
       return {
-        get: (): MaybeUndefined<boolean, TDefined> => {
+        get: (): MaybeUndefined<boolean, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as boolean | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<boolean, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<boolean, TRequired, THasDefault>;
         },
-        set: (value: boolean) => {
+        set: (value: InferSetInput<TRequired, THasDefault>) => {
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
           );
         },
-        toSnapshot: (): MaybeUndefined<boolean, TDefined> => {
+        update: (value: InferUpdateInput<TRequired, THasDefault>) => {
+          env.addOperation(
+            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+          );
+        },
+        toSnapshot: (): MaybeUndefined<boolean, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as boolean | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<boolean, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<boolean, TRequired, THasDefault>;
         },
       };
     },

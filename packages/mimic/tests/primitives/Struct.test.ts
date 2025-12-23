@@ -93,10 +93,10 @@ describe("StructPrimitive", () => {
       });
 
       const structPrimitive = Primitive.Struct({
-        name: Primitive.String().required(),
+        name: Primitive.String().required().default("John Doe"),
         age: Primitive.Number().required(),
         email: Primitive.String(),
-      }).default({ name: "John Doe" });
+      }).default({ age: 30 });
 
       const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
       proxy.set({ age: 30 });

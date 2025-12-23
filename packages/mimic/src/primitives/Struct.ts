@@ -4,9 +4,57 @@ import * as Operation from "../Operation";
 import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
-import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator, InferState, InferProxy, InferSnapshot } from "../Primitive";
+import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator, InferState, InferProxy, InferSnapshot, NeedsValue, InferUpdateInput, InferSetInput } from "../Primitive";
 import { ValidationError } from "../Primitive";
-import { runValidators, applyDefaults, StructSetInput } from "./shared";
+import { runValidators, applyDefaults } from "./shared";
+
+// =============================================================================
+// Struct Set Input Types
+// =============================================================================
+
+/**
+ * Determines if a field is required for set() operations.
+ * A field is required if: TRequired is true AND THasDefault is false
+ */
+type IsRequiredForSet<T> = T extends Primitive<any, any, true, false> ? true : false;
+
+/**
+ * Extract keys of fields that are required for set() (required without default).
+ */
+type RequiredSetKeys<TFields extends Record<string, AnyPrimitive>> = {
+  [K in keyof TFields]: IsRequiredForSet<TFields[K]> extends true ? K : never;
+}[keyof TFields];
+
+/**
+ * Extract keys of fields that are optional for set() (has default OR not required).
+ */
+type OptionalSetKeys<TFields extends Record<string, AnyPrimitive>> = {
+  [K in keyof TFields]: IsRequiredForSet<TFields[K]> extends true ? never : K;
+}[keyof TFields];
+
+/**
+ * Compute the input type for set() operations on a struct.
+ * Required fields (required without default) must be provided.
+ * Optional fields (has default or not required) can be omitted.
+ * Uses each field's TSetInput type to handle nested structs correctly.
+ */
+export type StructSetInput<TFields extends Record<string, AnyPrimitive>> = 
+  { readonly [K in RequiredSetKeys<TFields>]: InferSetInput<TFields[K]> } &
+  { readonly [K in OptionalSetKeys<TFields>]?: InferSetInput<TFields[K]> };
+
+/**
+ * Input type for set() - respects required/default status of the struct.
+ * If the struct is required without a default, the value must be provided.
+ * The value itself uses StructSetInput which handles field-level required/default logic.
+ */
+type InferStructSetInput<TFields extends Record<string, AnyPrimitive>, TRequired extends boolean, THasDefault extends boolean> = 
+  NeedsValue<StructSetInput<TFields>, TRequired, THasDefault>;
+
+/**
+ * Input type for update() - always partial since update only modifies specified fields.
+ * For nested structs, allows recursive partial updates.
+ */
+type InferStructUpdateInput<TFields extends Record<string, AnyPrimitive>> = StructUpdateValue<TFields>;
 
 
 /**
@@ -27,29 +75,27 @@ export type InferStructSnapshot<TFields extends Record<string, AnyPrimitive>> = 
 
 /**
  * Maps a schema definition to a partial update type.
- * For nested structs, allows recursive partial updates.
+ * Uses each field's TUpdateInput type, which handles nested updates recursively.
  */
 export type StructUpdateValue<TFields extends Record<string, AnyPrimitive>> = {
-  readonly [K in keyof TFields]?: TFields[K] extends StructPrimitive<infer F, any>
-    ? StructUpdateValue<F> | InferState<TFields[K]>
-    : InferState<TFields[K]>;
+  readonly [K in keyof TFields]?: InferUpdateInput<TFields[K]>;
 };
 
 /**
  * Maps a schema definition to its proxy type.
  * Provides nested field access + get()/set()/toSnapshot() methods for the whole struct.
  */
-export type StructProxy<TFields extends Record<string, AnyPrimitive>, TDefined extends boolean = false> = {
+export type StructProxy<TFields extends Record<string, AnyPrimitive>, TRequired extends boolean = false, THasDefault extends boolean = false> = {
   readonly [K in keyof TFields]: InferProxy<TFields[K]>;
 } & {
   /** Gets the entire struct value */
-  get(): MaybeUndefined<InferStructState<TFields>, TDefined>;
+  get(): MaybeUndefined<InferStructState<TFields>, TRequired, THasDefault>;
   /** Sets the entire struct value (only fields that are required without defaults must be provided) */
-  set(value: StructSetInput<TFields>): void;
+  set(value: InferStructSetInput<TFields, TRequired, THasDefault>): void;
   /** Updates only the specified fields (partial update, handles nested structs recursively) */
-  update(value: StructUpdateValue<TFields>): void;
+  update(value: InferStructUpdateInput<TFields>): void;
   /** Returns a readonly snapshot of the struct for rendering */
-  toSnapshot(): MaybeUndefined<InferStructSnapshot<TFields>, TDefined>;
+  toSnapshot(): MaybeUndefined<InferStructSnapshot<TFields>, TRequired, THasDefault>;
 };
 
 interface StructPrimitiveSchema<TFields extends Record<string, AnyPrimitive>> {
@@ -59,14 +105,16 @@ interface StructPrimitiveSchema<TFields extends Record<string, AnyPrimitive>> {
   readonly validators: readonly Validator<InferStructState<TFields>>[];
 }
 
-export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefined extends boolean = false, THasDefault extends boolean = false>
-  implements Primitive<InferStructState<TFields>, StructProxy<TFields, TDefined>, TDefined, THasDefault>
+export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TRequired extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<InferStructState<TFields>, StructProxy<TFields, TRequired, THasDefault>, TRequired, THasDefault, InferStructSetInput<TFields, TRequired, THasDefault>, InferStructUpdateInput<TFields>>
 {
   readonly _tag = "StructPrimitive" as const;
   readonly _State!: InferStructState<TFields>;
-  readonly _Proxy!: StructProxy<TFields, TDefined>;
-  readonly _TDefined!: TDefined;
+  readonly _Proxy!: StructProxy<TFields, TRequired, THasDefault>;
+  readonly _TRequired!: TRequired;
   readonly _THasDefault!: THasDefault;
+  readonly TSetInput!: InferStructSetInput<TFields, TRequired, THasDefault>;
+  readonly TUpdateInput!: InferStructUpdateInput<TFields>;
 
   private readonly _schema: StructPrimitiveSchema<TFields>;
 
@@ -92,7 +140,7 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
   }
 
   /** Set a default value for this struct */
-  default(defaultValue: StructSetInput<TFields>): StructPrimitive<TFields, true, true> {
+  default(defaultValue: StructSetInput<TFields>): StructPrimitive<TFields, TRequired, true> {
     // Apply defaults to the provided value
     const merged = applyDefaults(this as AnyPrimitive, defaultValue as Partial<InferStructState<TFields>>) as InferStructState<TFields>;
     return new StructPrimitive({
@@ -107,15 +155,15 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
   }
 
   /** Add a custom validation rule (useful for cross-field validation) */
-  refine(fn: (value: InferStructState<TFields>) => boolean, message: string): StructPrimitive<TFields, TDefined, THasDefault> {
+  refine(fn: (value: InferStructState<TFields>) => boolean, message: string): StructPrimitive<TFields, TRequired, THasDefault> {
     return new StructPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
     });
   }
 
-  readonly _internal: PrimitiveInternal<InferStructState<TFields>, StructProxy<TFields, TDefined>> = {
-    createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): StructProxy<TFields, TDefined> => {
+  readonly _internal: PrimitiveInternal<InferStructState<TFields>, StructProxy<TFields, TRequired, THasDefault>> = {
+    createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): StructProxy<TFields, TRequired, THasDefault> => {
       const fields = this._schema.fields;
       const defaultValue = this._schema.defaultValue;
 
@@ -148,18 +196,18 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
 
       // Create the base object with get/set/update/toSnapshot methods
       const base = {
-        get: (): MaybeUndefined<InferStructState<TFields>, TDefined> => {
+        get: (): MaybeUndefined<InferStructState<TFields>, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as InferStructState<TFields> | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<InferStructState<TFields>, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<InferStructState<TFields>, TRequired, THasDefault>;
         },
-        set: (value: StructSetInput<TFields>) => {
+        set: (value: InferStructSetInput<TFields, TRequired, THasDefault>) => {
           // Apply defaults for missing fields
           const merged = applyDefaults(this as AnyPrimitive, value as Partial<InferStructState<TFields>>) as InferStructState<TFields>;
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.set, merged)
           );
         },
-        update: (value: StructUpdateValue<TFields>) => {
+        update: (value: InferStructUpdateInput<TFields>) => {
           for (const key in value) {
             if (Object.prototype.hasOwnProperty.call(value, key)) {
               const fieldValue = value[key as keyof TFields];
@@ -187,14 +235,14 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TDefi
             }
           }
         },
-        toSnapshot: (): MaybeUndefined<InferStructSnapshot<TFields>, TDefined> => {
+        toSnapshot: (): MaybeUndefined<InferStructSnapshot<TFields>, TRequired, THasDefault> => {
           const snapshot = buildSnapshot();
-          return snapshot as MaybeUndefined<InferStructSnapshot<TFields>, TDefined>;
+          return snapshot as MaybeUndefined<InferStructSnapshot<TFields>, TRequired, THasDefault>;
         },
       };
 
       // Use a JavaScript Proxy to intercept field access
-      return new globalThis.Proxy(base as StructProxy<TFields, TDefined>, {
+      return new globalThis.Proxy(base as StructProxy<TFields, TRequired, THasDefault>, {
         get: (target, prop, _receiver) => {
           // Return base methods (get, set, update, toSnapshot)
           if (prop === "get") {

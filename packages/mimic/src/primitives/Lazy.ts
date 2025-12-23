@@ -4,9 +4,19 @@ import * as Operation from "../Operation";
 import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
-import type { Primitive, PrimitiveInternal, AnyPrimitive, InferState, InferProxy, InferSnapshot } from "../Primitive";
+import type { Primitive, PrimitiveInternal, AnyPrimitive, InferState, InferProxy, InferSnapshot, InferSetInput, InferUpdateInput } from "../Primitive";
 import { ValidationError } from "../Primitive";
 import { runValidators } from "./shared";
+
+/**
+ * Type to infer SetInput from a lazy thunk
+ */
+export type InferLazySetInput<T extends () => AnyPrimitive> = InferSetInput<ReturnType<T>>;
+
+/**
+ * Type to infer UpdateInput from a lazy thunk
+ */
+export type InferLazyUpdateInput<T extends () => AnyPrimitive> = InferUpdateInput<ReturnType<T>>;
 
 
 /**
@@ -25,11 +35,15 @@ export type InferLazyProxy<T extends () => AnyPrimitive> = InferProxy<ReturnType
 export type InferLazySnapshot<T extends () => AnyPrimitive> = InferSnapshot<ReturnType<T>>;
 
 export class LazyPrimitive<TThunk extends () => AnyPrimitive>
-  implements Primitive<InferLazyState<TThunk>, InferLazyProxy<TThunk>>
+  implements Primitive<InferLazyState<TThunk>, InferLazyProxy<TThunk>, false, false, InferLazySetInput<TThunk>, InferLazyUpdateInput<TThunk>>
 {
   readonly _tag = "LazyPrimitive" as const;
   readonly _State!: InferLazyState<TThunk>;
   readonly _Proxy!: InferLazyProxy<TThunk>;
+  readonly _TRequired!: false;
+  readonly _THasDefault!: false;
+  readonly TSetInput!: InferLazySetInput<TThunk>;
+  readonly TUpdateInput!: InferLazyUpdateInput<TThunk>;
 
   private readonly _thunk: TThunk;
   private _resolved: ReturnType<TThunk> | undefined;

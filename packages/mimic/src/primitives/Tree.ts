@@ -5,11 +5,12 @@ import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
 import * as FractionalIndex from "../FractionalIndex";
-import type { Primitive, PrimitiveInternal, Validator, InferProxy, AnyPrimitive, StructSetInput } from "./shared";
+import type { Primitive, PrimitiveInternal, Validator, InferProxy, AnyPrimitive, InferSetInput, InferUpdateInput } from "./shared";
 import { ValidationError, applyDefaults } from "./shared";
 import { runValidators } from "./shared";
 import type { AnyTreeNodePrimitive, InferTreeNodeType, InferTreeNodeDataState, InferTreeNodeChildren } from "./TreeNode";
-import { InferStructState, StructUpdateValue, StructPrimitive } from "./Struct";
+import { InferStructState, StructSetInput, StructUpdateValue } from "./Struct";
+import { StructPrimitive } from "./Struct";
 
 
 /**
@@ -106,21 +107,28 @@ export type InferTreeSnapshot<T extends TreePrimitive<any>> =
   T extends TreePrimitive<infer TRoot> ? TreeNodeSnapshot<TRoot> : never;
 
 /**
- * Helper type to infer the update value type from a TreeNode's data
+ * Helper type to infer the update value type from a TreeNode's data.
+ * Uses StructUpdateValue directly to get field-level partial update semantics.
+ * All fields are optional in update operations.
  */
-export type TreeNodeUpdateValue<TNode extends AnyTreeNodePrimitive> =
+export type TreeNodeUpdateValue<TNode extends AnyTreeNodePrimitive> = 
   TNode["data"] extends StructPrimitive<infer TFields, any, any>
     ? StructUpdateValue<TFields>
-    : never;
+    : InferUpdateInput<TNode["data"]>;
 
 /**
- * Helper type to infer the input type for node data (with defaults applied).
- * Uses StructSetInput for struct data, making fields with defaults optional.
+ * Helper type to infer the input type for node data (respects field defaults).
+ * Uses StructSetInput directly so that:
+ * - Fields that are required AND have no default must be provided
+ * - Fields that are optional OR have defaults can be omitted
+ * 
+ * This bypasses the struct-level NeedsValue wrapper since tree inserts
+ * always require a data object (even if empty for all-optional fields).
  */
-export type TreeNodeDataSetInput<TNode extends AnyTreeNodePrimitive> =
+export type TreeNodeDataSetInput<TNode extends AnyTreeNodePrimitive> = 
   TNode["data"] extends StructPrimitive<infer TFields, any, any>
     ? StructSetInput<TFields>
-    : InferTreeNodeDataState<TNode>;
+    : InferSetInput<TNode["data"]>;
 
 /**
  * Typed proxy for a specific node type - provides type-safe data access
@@ -255,14 +263,22 @@ interface TreePrimitiveSchema<TRoot extends AnyTreeNodePrimitive> {
   readonly validators: readonly Validator<TreeState<TRoot>>[];
 }
 
-export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TDefined extends boolean = false, THasDefault extends boolean = false>
-  implements Primitive<TreeState<TRoot>, TreeProxy<TRoot>, TDefined, THasDefault>
+/** Input type for tree set() - tree state */
+export type TreeSetInput<TRoot extends AnyTreeNodePrimitive> = TreeState<TRoot>;
+
+/** Input type for tree update() - same as set() for trees */
+export type TreeUpdateInput<TRoot extends AnyTreeNodePrimitive> = TreeState<TRoot>;
+
+export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<TreeState<TRoot>, TreeProxy<TRoot>, TRequired, THasDefault, TreeSetInput<TRoot>, TreeUpdateInput<TRoot>>
 {
   readonly _tag = "TreePrimitive" as const;
   readonly _State!: TreeState<TRoot>;
   readonly _Proxy!: TreeProxy<TRoot>;
-  readonly _TDefined!: TDefined;
+  readonly _TRequired!: TRequired;
   readonly _THasDefault!: THasDefault;
+  readonly TSetInput!: TreeSetInput<TRoot>;
+  readonly TUpdateInput!: TreeUpdateInput<TRoot>;
 
   private readonly _schema: TreePrimitiveSchema<TRoot>;
   private _nodeTypeRegistry: Map<string, AnyTreeNodePrimitive> | undefined;
@@ -307,7 +323,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TDefined extends 
   }
 
   /** Set a default value for this tree */
-  default(defaultValue: TreeState<TRoot>): TreePrimitive<TRoot, true, true> {
+  default(defaultValue: TreeState<TRoot>): TreePrimitive<TRoot, TRequired, true> {
     return new TreePrimitive({
       ...this._schema,
       defaultValue,
@@ -320,7 +336,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TDefined extends 
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: TreeState<TRoot>) => boolean, message: string): TreePrimitive<TRoot, TDefined, THasDefault> {
+  refine(fn: (value: TreeState<TRoot>) => boolean, message: string): TreePrimitive<TRoot, TRequired, THasDefault> {
     return new TreePrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],

@@ -4,18 +4,22 @@ import * as Operation from "../Operation";
 import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
-import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator } from "../Primitive";
-import { ValidationError } from "../Primitive";
-import { runValidators, isCompatibleOperation } from "./shared";
+import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator, NeedsValue } from "./shared";
+import { ValidationError, runValidators, isCompatibleOperation } from "./shared";
 
 
-export interface NumberProxy<TDefined extends boolean = false> {
+type InferSetInput<TRequired extends boolean = false, THasDefault extends boolean = false> = NeedsValue<number, TRequired, THasDefault>
+type InferUpdateInput<TRequired extends boolean = false, THasDefault extends boolean = false> = NeedsValue<number, TRequired, THasDefault>
+
+export interface NumberProxy<TRequired extends boolean = false, THasDefault extends boolean = false> {
   /** Gets the current number value */
-  get(): MaybeUndefined<number, TDefined>;
+  get(): MaybeUndefined<number, TRequired, THasDefault>;
   /** Sets the number value, generating a number.set operation */
-  set(value: number): void;
+  set(value: InferSetInput<TRequired, THasDefault>): void;
+  /** This is the same as set. Updates the number value, generating a number.set operation */
+  update(value: InferUpdateInput<TRequired, THasDefault>): void;
   /** Returns a readonly snapshot of the number value for rendering */
-  toSnapshot(): MaybeUndefined<number, TDefined>;
+  toSnapshot(): MaybeUndefined<number, TRequired, THasDefault>;
 }
 
 interface NumberPrimitiveSchema {
@@ -24,12 +28,14 @@ interface NumberPrimitiveSchema {
   readonly validators: readonly Validator<number>[];
 }
 
-export class NumberPrimitive<TDefined extends boolean = false, THasDefault extends boolean = false> implements Primitive<number, NumberProxy<TDefined>, TDefined, THasDefault> {
+export class NumberPrimitive<TRequired extends boolean = false, THasDefault extends boolean = false> implements Primitive<number, NumberProxy<TRequired, THasDefault>, TRequired, THasDefault, InferSetInput<TRequired, THasDefault>, InferUpdateInput<TRequired, THasDefault>> {
   readonly _tag = "NumberPrimitive" as const;
   readonly _State!: number;
-  readonly _Proxy!: NumberProxy<TDefined>;
-  readonly _TDefined!: TDefined;
+  readonly _Proxy!: NumberProxy<TRequired, THasDefault>;
+  readonly _TRequired!: TRequired;
   readonly _THasDefault!: THasDefault;
+  readonly TUpdateInput!: InferUpdateInput<TRequired, THasDefault>;
+  readonly TSetInput!: InferSetInput<TRequired, THasDefault>;
 
   private readonly _schema: NumberPrimitiveSchema;
 
@@ -55,7 +61,7 @@ export class NumberPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Set a default value for this number */
-  default(defaultValue: number): NumberPrimitive<true, true> {
+  default(defaultValue: number): NumberPrimitive<TRequired, true> {
     return new NumberPrimitive({
       ...this._schema,
       defaultValue,
@@ -63,7 +69,7 @@ export class NumberPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Add a custom validation rule */
-  refine(fn: (value: number) => boolean, message: string): NumberPrimitive<TDefined, THasDefault> {
+  refine(fn: (value: number) => boolean, message: string): NumberPrimitive<TRequired, THasDefault> {
     return new NumberPrimitive({
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
@@ -71,7 +77,7 @@ export class NumberPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Minimum value (inclusive) */
-  min(value: number): NumberPrimitive<TDefined, THasDefault> {
+  min(value: number): NumberPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => v >= value,
       `Number must be at least ${value}`
@@ -79,7 +85,7 @@ export class NumberPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Maximum value (inclusive) */
-  max(value: number): NumberPrimitive<TDefined, THasDefault> {
+  max(value: number): NumberPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => v <= value,
       `Number must be at most ${value}`
@@ -87,7 +93,7 @@ export class NumberPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Must be positive (> 0) */
-  positive(): NumberPrimitive<TDefined, THasDefault> {
+  positive(): NumberPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => v > 0,
       "Number must be positive"
@@ -95,7 +101,7 @@ export class NumberPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Must be negative (< 0) */
-  negative(): NumberPrimitive<TDefined, THasDefault> {
+  negative(): NumberPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => v < 0,
       "Number must be negative"
@@ -103,29 +109,34 @@ export class NumberPrimitive<TDefined extends boolean = false, THasDefault exten
   }
 
   /** Must be an integer */
-  int(): NumberPrimitive<TDefined, THasDefault> {
+  int(): NumberPrimitive<TRequired, THasDefault> {
     return this.refine(
       (v) => globalThis.Number.isInteger(v),
       "Number must be an integer"
     );
   }
 
-  readonly _internal: PrimitiveInternal<number, NumberProxy<TDefined>> = {
-    createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): NumberProxy<TDefined> => {
+  readonly _internal: PrimitiveInternal<number, NumberProxy<TRequired, THasDefault>> = {
+    createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): NumberProxy<TRequired, THasDefault> => {
       const defaultValue = this._schema.defaultValue;
       return {
-        get: (): MaybeUndefined<number, TDefined> => {
+        get: (): MaybeUndefined<number, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as number | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<number, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<number, TRequired, THasDefault>;
         },
-        set: (value: number) => {
+        set: (value: InferSetInput<TRequired, THasDefault>) => {
           env.addOperation(
             Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
           );
         },
-        toSnapshot: (): MaybeUndefined<number, TDefined> => {
+        update: (value: InferUpdateInput<TRequired, THasDefault>) => {
+          env.addOperation(
+            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+          );
+        },
+        toSnapshot: (): MaybeUndefined<number, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as number | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<number, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<number, TRequired, THasDefault>;
         },
       };
     },

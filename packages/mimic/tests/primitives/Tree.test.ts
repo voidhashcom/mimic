@@ -582,6 +582,134 @@ describe("TreePrimitive", () => {
       expect(operations[0]!.path.toTokens()).toEqual(["file1", "size"]);
     });
   });
+
+  describe("proxy - insert with defaults", () => {
+    // Define node types with defaults
+    const ItemNodeWithDefaults = Primitive.TreeNode("item", {
+      data: Primitive.Struct({ 
+        title: Primitive.String().required(), // Must provide
+        count: Primitive.Number().default(0), // Has default, optional
+        active: Primitive.Boolean().default(true), // Has default, optional
+      }),
+      children: [] as const,
+    });
+
+    const ContainerNodeWithDefaults = Primitive.TreeNode("container", {
+      data: Primitive.Struct({ 
+        name: Primitive.String().required(), // Must provide
+      }),
+      children: (): readonly Primitive.AnyTreeNodePrimitive[] => [ContainerNodeWithDefaults, ItemNodeWithDefaults],
+    });
+
+    const treeWithDefaults = Primitive.Tree({
+      root: ContainerNodeWithDefaults,
+    });
+
+    // Helper to create a mock environment
+    const createEnvWithDefaultsTree = (
+      state: Primitive.TreeState<typeof ContainerNodeWithDefaults> = []
+    ): { env: ReturnType<typeof ProxyEnvironment.make>; operations: Operation.Operation<any, any, any>[] } => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      let currentState = [...state] as Primitive.TreeState<typeof ContainerNodeWithDefaults>;
+      let idCounter = 0;
+
+      const env = ProxyEnvironment.make({
+        onOperation: (op) => {
+          operations.push(op);
+          currentState = treeWithDefaults._internal.applyOperation(currentState, op);
+        },
+        getState: () => currentState,
+        generateId: () => `node-${++idCounter}`,
+      });
+
+      return { env, operations };
+    };
+
+    it("insertFirst() only requires fields without defaults", () => {
+      const initialState: Primitive.TreeState<typeof ContainerNodeWithDefaults> = [
+        { id: "root", type: "container", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      const { env, operations } = createEnvWithDefaultsTree(initialState);
+      const proxy = treeWithDefaults._internal.createProxy(env, OperationPath.make(""));
+
+      // Only provide required field 'title', count and active should use defaults
+      const newId = proxy.insertFirst("root", ItemNodeWithDefaults, { title: "New Item" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("tree.insert");
+      expect(newId).toBe("node-1");
+
+      const payload = operations[0]!.payload as { data: { title: string; count: number; active: boolean } };
+      expect(payload.data.title).toBe("New Item");
+      expect(payload.data.count).toBe(0); // Default value
+      expect(payload.data.active).toBe(true); // Default value
+    });
+
+    it("insertLast() applies defaults for omitted fields", () => {
+      const initialState: Primitive.TreeState<typeof ContainerNodeWithDefaults> = [
+        { id: "root", type: "container", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      const { env, operations } = createEnvWithDefaultsTree(initialState);
+      const proxy = treeWithDefaults._internal.createProxy(env, OperationPath.make(""));
+
+      // Provide title and override count, let active use default
+      proxy.insertLast("root", ItemNodeWithDefaults, { title: "Item", count: 42 });
+
+      const payload = operations[0]!.payload as { data: { title: string; count: number; active: boolean } };
+      expect(payload.data.title).toBe("Item");
+      expect(payload.data.count).toBe(42); // Overridden
+      expect(payload.data.active).toBe(true); // Default value
+    });
+
+    it("insertAt() allows omitting all optional fields with defaults", () => {
+      const initialState: Primitive.TreeState<typeof ContainerNodeWithDefaults> = [
+        { id: "root", type: "container", parentId: null, pos: "a0", data: { name: "Root" } },
+      ];
+      const { env, operations } = createEnvWithDefaultsTree(initialState);
+      const proxy = treeWithDefaults._internal.createProxy(env, OperationPath.make(""));
+
+      // Only provide required 'name' for container
+      proxy.insertAt("root", 0, ContainerNodeWithDefaults, { name: "Subfolder" });
+
+      const payload = operations[0]!.payload as { type: string; data: { name: string } };
+      expect(payload.type).toBe("container");
+      expect(payload.data.name).toBe("Subfolder");
+    });
+
+    it("insertAfter() uses defaults when fields are omitted", () => {
+      const initialState: Primitive.TreeState<typeof ContainerNodeWithDefaults> = [
+        { id: "root", type: "container", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "item1", type: "item", parentId: "root", pos: "a0", data: { title: "First", count: 1, active: false } },
+      ];
+      const { env, operations } = createEnvWithDefaultsTree(initialState);
+      const proxy = treeWithDefaults._internal.createProxy(env, OperationPath.make(""));
+
+      // Insert after sibling with only required field
+      proxy.insertAfter("item1", ItemNodeWithDefaults, { title: "Second" });
+
+      const payload = operations[0]!.payload as { data: { title: string; count: number; active: boolean } };
+      expect(payload.data.title).toBe("Second");
+      expect(payload.data.count).toBe(0); // Default
+      expect(payload.data.active).toBe(true); // Default
+    });
+
+    it("insertBefore() uses defaults when fields are omitted", () => {
+      const initialState: Primitive.TreeState<typeof ContainerNodeWithDefaults> = [
+        { id: "root", type: "container", parentId: null, pos: "a0", data: { name: "Root" } },
+        { id: "item1", type: "item", parentId: "root", pos: "a0", data: { title: "First", count: 1, active: false } },
+      ];
+      const { env, operations } = createEnvWithDefaultsTree(initialState);
+      const proxy = treeWithDefaults._internal.createProxy(env, OperationPath.make(""));
+
+      // Insert before sibling with only required field, override active
+      proxy.insertBefore("item1", ItemNodeWithDefaults, { title: "Zeroth", active: false });
+
+      const payload = operations[0]!.payload as { data: { title: string; count: number; active: boolean } };
+      expect(payload.data.title).toBe("Zeroth");
+      expect(payload.data.count).toBe(0); // Default
+      expect(payload.data.active).toBe(false); // Overridden
+    });
+  });
 });
 
 // =============================================================================

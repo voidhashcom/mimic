@@ -17,13 +17,15 @@ import * as Transform from "../Transform";
  * @typeParam TDefined - Whether the value is guaranteed to be defined (via required() or default())
  * @typeParam THasDefault - Whether this primitive has a default value
  */
-export interface Primitive<TState, TProxy, TDefined extends boolean = false, THasDefault extends boolean = false> {
+export interface Primitive<TState, TProxy, TRequired extends boolean = false, THasDefault extends boolean = false, TSetInput = unknown, TUpdateInput = unknown> {
     readonly _tag: string;
     readonly _State: TState;
     readonly _Proxy: TProxy;
-    readonly _TDefined: TDefined;
+    readonly _TRequired: TRequired;
     readonly _THasDefault: THasDefault;
     readonly _internal: PrimitiveInternal<TState, TProxy>;
+    readonly TSetInput: TSetInput;
+    readonly TUpdateInput: TUpdateInput;
   }
   
   /**
@@ -64,13 +66,32 @@ export interface Primitive<TState, TProxy, TDefined extends boolean = false, THa
    * Infer the proxy type from a primitive.
    */
   export type InferProxy<T> = T extends Primitive<any, infer P, any, any> ? P : never;
+
+  /**
+   * Infer the SetInput type from a primitive.
+   */
+  export type InferSetInput<T> = T extends Primitive<any, any, any, any, infer S, any> ? S : never;
+
+  /**
+   * Infer the UpdateInput type from a primitive.
+   */
+  export type InferUpdateInput<T> = T extends Primitive<any, any, any, any, any, infer U> ? U : never;
   
   /**
-   * Helper type to conditionally add undefined based on TDefined.
-   * When TDefined is true, the value is guaranteed to be defined (via required() or default()).
-   * When TDefined is false, the value may be undefined.
+   * Helper type to conditionally add undefined based on TRequired and THasDefault.
+   * When TRequired is false and THasDefault is false, the value may be undefined.
+   * Otherwise, the value is guaranteed to be defined.
    */
-  export type MaybeUndefined<T, TDefined extends boolean> = TDefined extends true ? T : T | undefined;
+  export type MaybeUndefined<T, TRequired extends boolean, THasDefault extends boolean> = TRequired extends false ? THasDefault extends false ? Optional<T> : T : T;
+
+  export type Optional<T> = T | undefined;
+
+  /**
+   * Helper type to conditionally add undefined based on TRequired and THasDefault.
+   * When TRequired is true and THasDefault is false, the value must be provided.
+   * Otherwise, the value may be undefined.
+   */
+  export type NeedsValue<T, TRequired extends boolean, THasDefault extends boolean> = TRequired extends true ? THasDefault extends false ? T : Optional<T> : Optional<T>;
   
   /**
    * Infer the snapshot type from a primitive.
@@ -90,34 +111,6 @@ export interface Primitive<TState, TProxy, TDefined extends boolean = false, THa
    */
   export type IsDefined<T> = T extends Primitive<any, any, infer D, any> ? D : false;
 
-  /**
-   * Determines if a field is required for set() operations.
-   * A field is required if: TDefined is true AND THasDefault is false
-   */
-  export type IsRequiredForSet<T> = T extends Primitive<any, any, true, false> ? true : false;
-
-  /**
-   * Extract keys of fields that are required for set() (required without default).
-   */
-  export type RequiredSetKeys<TFields extends Record<string, AnyPrimitive>> = {
-    [K in keyof TFields]: IsRequiredForSet<TFields[K]> extends true ? K : never;
-  }[keyof TFields];
-
-  /**
-   * Extract keys of fields that are optional for set() (has default OR not required).
-   */
-  export type OptionalSetKeys<TFields extends Record<string, AnyPrimitive>> = {
-    [K in keyof TFields]: IsRequiredForSet<TFields[K]> extends true ? never : K;
-  }[keyof TFields];
-
-  /**
-   * Compute the input type for set() operations on a struct.
-   * Required fields (required without default) must be provided.
-   * Optional fields (has default or not required) can be omitted.
-   */
-  export type StructSetInput<TFields extends Record<string, AnyPrimitive>> = 
-    { readonly [K in RequiredSetKeys<TFields>]: InferState<TFields[K]> } &
-    { readonly [K in OptionalSetKeys<TFields>]?: InferState<TFields[K]> };
   
   // =============================================================================
   // Validation Errors

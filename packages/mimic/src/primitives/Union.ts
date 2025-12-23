@@ -4,11 +4,11 @@ import * as Operation from "../Operation";
 import * as OperationPath from "../OperationPath";
 import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
-import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, InferState, InferProxy, InferSnapshot } from "../Primitive";
+import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, InferState, InferProxy, InferSnapshot, InferSetInput } from "../Primitive";
 import { ValidationError } from "../Primitive";
 import { LiteralPrimitive } from "./Literal";
 import { StructPrimitive, InferStructState } from "./Struct";
-import { runValidators, applyDefaults, StructSetInput } from "./shared";
+import { runValidators, applyDefaults } from "./shared";
 
 
 /**
@@ -32,20 +32,18 @@ export type InferUnionSnapshot<TVariants extends UnionVariants> = {
 
 /**
  * Compute the input type for union.set() operations.
- * For each variant, uses StructSetInput to make fields with defaults optional.
+ * Uses each variant's TSetInput type.
  */
 export type UnionSetInput<TVariants extends UnionVariants> = {
-  [K in keyof TVariants]: TVariants[K] extends StructPrimitive<infer TFields, any, any>
-    ? StructSetInput<TFields>
-    : InferState<TVariants[K]>;
+  [K in keyof TVariants]: InferSetInput<TVariants[K]>;
 }[keyof TVariants];
 
 /**
  * Proxy for accessing union variants
  */
-export interface UnionProxy<TVariants extends UnionVariants, _TDiscriminator extends string, TDefined extends boolean = false> {
+export interface UnionProxy<TVariants extends UnionVariants, _TDiscriminator extends string, TRequired extends boolean = false, THasDefault extends boolean = false> {
   /** Gets the current union value */
-  get(): MaybeUndefined<InferUnionState<TVariants>, TDefined>;
+  get(): MaybeUndefined<InferUnionState<TVariants>, TRequired, THasDefault>;
   
   /** Sets the entire union value (applies defaults for variant fields) */
   set(value: UnionSetInput<TVariants>): void;
@@ -59,7 +57,7 @@ export interface UnionProxy<TVariants extends UnionVariants, _TDiscriminator ext
   }): R | undefined;
   
   /** Returns a readonly snapshot of the union for rendering */
-  toSnapshot(): MaybeUndefined<InferUnionSnapshot<TVariants>, TDefined>;
+  toSnapshot(): MaybeUndefined<InferUnionSnapshot<TVariants>, TRequired, THasDefault>;
 }
 
 interface UnionPrimitiveSchema<TVariants extends UnionVariants, TDiscriminator extends string> {
@@ -69,14 +67,16 @@ interface UnionPrimitiveSchema<TVariants extends UnionVariants, TDiscriminator e
   readonly variants: TVariants;
 }
 
-export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator extends string = "type", TDefined extends boolean = false, THasDefault extends boolean = false>
-  implements Primitive<InferUnionState<TVariants>, UnionProxy<TVariants, TDiscriminator, TDefined>, TDefined, THasDefault>
+export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator extends string = "type", TRequired extends boolean = false, THasDefault extends boolean = false>
+  implements Primitive<InferUnionState<TVariants>, UnionProxy<TVariants, TDiscriminator, TRequired, THasDefault>, TRequired, THasDefault, UnionSetInput<TVariants>, UnionSetInput<TVariants>>
 {
   readonly _tag = "UnionPrimitive" as const;
   readonly _State!: InferUnionState<TVariants>;
-  readonly _Proxy!: UnionProxy<TVariants, TDiscriminator, TDefined>;
-  readonly _TDefined!: TDefined;
+  readonly _Proxy!: UnionProxy<TVariants, TDiscriminator, TRequired, THasDefault>;
+  readonly _TRequired!: TRequired;
   readonly _THasDefault!: THasDefault;
+  readonly TSetInput!: UnionSetInput<TVariants>;
+  readonly TUpdateInput!: UnionSetInput<TVariants>;
 
   private readonly _schema: UnionPrimitiveSchema<TVariants, TDiscriminator>;
 
@@ -153,18 +153,18 @@ export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator exte
     return applyDefaults(variantPrimitive as AnyPrimitive, value) as InferUnionState<TVariants>;
   }
 
-  readonly _internal: PrimitiveInternal<InferUnionState<TVariants>, UnionProxy<TVariants, TDiscriminator, TDefined>> = {
+  readonly _internal: PrimitiveInternal<InferUnionState<TVariants>, UnionProxy<TVariants, TDiscriminator, TRequired, THasDefault>> = {
     createProxy: (
       env: ProxyEnvironment.ProxyEnvironment,
       operationPath: OperationPath.OperationPath
-    ): UnionProxy<TVariants, TDiscriminator, TDefined> => {
+    ): UnionProxy<TVariants, TDiscriminator, TRequired, THasDefault> => {
       const variants = this._schema.variants;
       const defaultValue = this._schema.defaultValue;
 
       return {
-        get: (): MaybeUndefined<InferUnionState<TVariants>, TDefined> => {
+        get: (): MaybeUndefined<InferUnionState<TVariants>, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as InferUnionState<TVariants> | undefined;
-          return (state ?? defaultValue) as MaybeUndefined<InferUnionState<TVariants>, TDefined>;
+          return (state ?? defaultValue) as MaybeUndefined<InferUnionState<TVariants>, TRequired, THasDefault>;
         },
         set: (value: UnionSetInput<TVariants>) => {
           // Apply defaults for the variant
@@ -193,21 +193,21 @@ export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator exte
           const variantProxy = variants[variantKey]!._internal.createProxy(env, operationPath) as InferProxy<TVariants[typeof variantKey]>;
           return handler(variantProxy);
         },
-        toSnapshot: (): MaybeUndefined<InferUnionSnapshot<TVariants>, TDefined> => {
+        toSnapshot: (): MaybeUndefined<InferUnionSnapshot<TVariants>, TRequired, THasDefault> => {
           const state = env.getState(operationPath) as InferUnionState<TVariants> | undefined;
           const effectiveState = state ?? defaultValue;
           if (!effectiveState) {
-            return undefined as MaybeUndefined<InferUnionSnapshot<TVariants>, TDefined>;
+            return undefined as MaybeUndefined<InferUnionSnapshot<TVariants>, TRequired, THasDefault>;
           }
           
           const variantKey = this._findVariantKey(effectiveState);
           if (!variantKey) {
-            return undefined as MaybeUndefined<InferUnionSnapshot<TVariants>, TDefined>;
+            return undefined as MaybeUndefined<InferUnionSnapshot<TVariants>, TRequired, THasDefault>;
           }
           
           const variantPrimitive = variants[variantKey]!;
           const variantProxy = variantPrimitive._internal.createProxy(env, operationPath);
-          return (variantProxy as unknown as { toSnapshot(): InferUnionSnapshot<TVariants> }).toSnapshot() as MaybeUndefined<InferUnionSnapshot<TVariants>, TDefined>;
+          return (variantProxy as unknown as { toSnapshot(): InferUnionSnapshot<TVariants> }).toSnapshot() as MaybeUndefined<InferUnionSnapshot<TVariants>, TRequired, THasDefault>;
         },
       };
     },
