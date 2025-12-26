@@ -11,7 +11,6 @@ import {
   COMMAND_SYMBOL,
   UNDOABLE_COMMAND_SYMBOL,
   isUndoableCommand,
-  type AnyEffectSchema,
   type Command,
   type Commander,
   type CommanderOptions,
@@ -19,7 +18,6 @@ import {
   type CommandContext,
   type CommandDispatch,
   type CommandFn,
-  type InferSchemaType,
   type RevertFn,
   type UndoableCommand,
   type UndoEntry,
@@ -132,97 +130,27 @@ export function createCommander<TStore extends object>(
   /**
    * Create a regular command (no undo support).
    */
-  function action<TParamsSchema extends AnyEffectSchema, TReturn = void>(
-    paramsSchema: TParamsSchema,
-    fn: CommandFn<TStore & CommanderSlice, InferSchemaType<TParamsSchema>, TReturn>
-  ): Command<TStore & CommanderSlice, InferSchemaType<TParamsSchema>, TReturn>;
-  function action<TReturn = void>(
-    fn: CommandFn<TStore & CommanderSlice, void, TReturn>
-  ): Command<TStore & CommanderSlice, void, TReturn>;
-  function action<TParamsSchema extends AnyEffectSchema, TReturn = void>(
-    paramsSchemaOrFn:
-      | TParamsSchema
-      | CommandFn<TStore & CommanderSlice, void, TReturn>,
-    maybeFn?: CommandFn<
-      TStore & CommanderSlice,
-      InferSchemaType<TParamsSchema>,
-      TReturn
-    >
-  ): Command<TStore & CommanderSlice, any, TReturn> {
-    // Check if we have two arguments (schema + fn) or just one (fn only)
-    if (maybeFn !== undefined) {
-      // First arg is schema, second is fn
-      return {
-        [COMMAND_SYMBOL]: true,
-        fn: maybeFn,
-        paramsSchema: paramsSchemaOrFn as TParamsSchema,
-      };
-    }
-
-    // Single argument - must be the action function (no params schema)
-    if (typeof paramsSchemaOrFn !== "function") {
-      throw new Error("Commander: action requires a function");
-    }
-
+  function action<TParams, TReturn = void>(
+    fn: CommandFn<TStore & CommanderSlice, TParams, TReturn>
+  ): Command<TStore & CommanderSlice, TParams, TReturn> {
     return {
       [COMMAND_SYMBOL]: true,
-      fn: paramsSchemaOrFn as CommandFn<TStore & CommanderSlice, void, TReturn>,
-      paramsSchema: null,
+      fn,
     };
   }
 
   /**
    * Create an undoable command with undo/redo support.
    */
-  function undoableAction<TParamsSchema extends AnyEffectSchema, TReturn>(
-    paramsSchema: TParamsSchema,
-    fn: CommandFn<TStore & CommanderSlice, InferSchemaType<TParamsSchema>, TReturn>,
-    revert: RevertFn<TStore & CommanderSlice, InferSchemaType<TParamsSchema>, TReturn>
-  ): UndoableCommand<TStore & CommanderSlice, InferSchemaType<TParamsSchema>, TReturn>;
-  function undoableAction<TReturn>(
-    fn: CommandFn<TStore & CommanderSlice, void, TReturn>,
-    revert: RevertFn<TStore & CommanderSlice, void, TReturn>
-  ): UndoableCommand<TStore & CommanderSlice, void, TReturn>;
-  function undoableAction<TParamsSchema extends AnyEffectSchema, TReturn>(
-    paramsSchemaOrFn:
-      | TParamsSchema
-      | CommandFn<TStore & CommanderSlice, void, TReturn>,
-    fnOrRevert:
-      | CommandFn<TStore & CommanderSlice, InferSchemaType<TParamsSchema>, TReturn>
-      | RevertFn<TStore & CommanderSlice, void, TReturn>,
-    maybeRevert?: RevertFn<
-      TStore & CommanderSlice,
-      InferSchemaType<TParamsSchema>,
-      TReturn
-    >
-  ): UndoableCommand<TStore & CommanderSlice, any, TReturn> {
-    // Check if we have three arguments (schema + fn + revert) or two (fn + revert)
-    if (maybeRevert !== undefined) {
-      // First arg is schema, second is fn, third is revert
-      return {
-        [COMMAND_SYMBOL]: true,
-        [UNDOABLE_COMMAND_SYMBOL]: true,
-        fn: fnOrRevert as CommandFn<
-          TStore & CommanderSlice,
-          InferSchemaType<TParamsSchema>,
-          TReturn
-        >,
-        paramsSchema: paramsSchemaOrFn as TParamsSchema,
-        revert: maybeRevert,
-      };
-    }
-
-    // Two arguments - fn + revert (no params schema)
-    if (typeof paramsSchemaOrFn !== "function") {
-      throw new Error("Commander: undoableAction requires a function");
-    }
-
+  function undoableAction<TParams, TReturn>(
+    fn: CommandFn<TStore & CommanderSlice, TParams, TReturn>,
+    revert: RevertFn<TStore & CommanderSlice, TParams, TReturn>
+  ): UndoableCommand<TStore & CommanderSlice, TParams, TReturn> {
     return {
       [COMMAND_SYMBOL]: true,
       [UNDOABLE_COMMAND_SYMBOL]: true,
-      fn: paramsSchemaOrFn as CommandFn<TStore & CommanderSlice, void, TReturn>,
-      paramsSchema: null,
-      revert: fnOrRevert as RevertFn<TStore & CommanderSlice, void, TReturn>,
+      fn,
+      revert,
     };
   }
 

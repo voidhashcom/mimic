@@ -1,6 +1,5 @@
 import { ClientDocument, WebSocketTransport, Presence } from "@voidhash/mimic/client";
 import { MimicExampleSchema, PresenceSchema } from "@voidhash/mimic-example-shared";
-import { Schema } from "effect";
 
 /**
  * Create a ClientDocument with presence support.

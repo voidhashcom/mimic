@@ -9,22 +9,22 @@
  * @example
  * ```ts
  * import { createCommander, useCommander, useUndoRedo } from "@voidhash/mimic-react/zustand-commander";
- * import { Schema } from "effect";
  *
  * // 1. Create commander bound to your store type
  * const commander = createCommander<StoreState>();
  *
  * // 2. Define regular actions
- * const selectCard = commander.action(
- *   Schema.Struct({ cardId: Schema.String }),
+ * const selectCard = commander.action<{ cardId: string }>(
  *   (ctx, params) => {
  *     ctx.setState({ selectedCardId: params.cardId });
  *   }
  * );
  *
  * // 3. Define undoable actions
- * const moveCard = commander.undoableAction(
- *   Schema.Struct({ cardId: Schema.String, toColumnId: Schema.String }),
+ * const moveCard = commander.undoableAction<
+ *   { cardId: string; toColumnId: string },
+ *   { fromColumnId: string }
+ * >(
  *   (ctx, params) => {
  *     const { mimic } = ctx.getState();
  *     const fromColumnId = // get current column
@@ -99,9 +99,6 @@ export {
 // =============================================================================
 
 export type {
-  // Schema types
-  AnyEffectSchema,
-  InferSchemaType,
   // Command types
   Command,
   UndoableCommand,

@@ -6,24 +6,7 @@
  * @since 0.0.1
  */
 
-import type { Schema } from "effect";
 import type { StoreApi, UseBoundStore } from "zustand";
-
-// =============================================================================
-// Schema Types
-// =============================================================================
-
-/**
- * Any Effect Schema type (used for type constraints).
- */
-export type AnyEffectSchema = Schema.Schema<any, any, any>;
-
-/**
- * Infer the Type from an Effect Schema.
- */
-export type InferSchemaType<T> = T extends Schema.Schema<infer A, any, any>
-  ? A
-  : never;
 
 // =============================================================================
 // Command Symbol & Type Guard
@@ -103,7 +86,6 @@ export type RevertFn<TStore, TParams, TReturn> = (
 export interface Command<TStore, TParams, TReturn> {
   readonly [COMMAND_SYMBOL]: true;
   readonly fn: CommandFn<TStore, TParams, TReturn>;
-  readonly paramsSchema: AnyEffectSchema | null;
 }
 
 /**
@@ -196,11 +178,10 @@ export interface Commander<TStore> {
    * Create a regular command (no undo support).
    *
    * @example
-   * // With params schema
-   * const addItem = commander.action(
-   *   Schema.Struct({ name: Schema.String }),
+   * // With params
+   * const addItem = commander.action<{ name: string }>(
    *   (ctx, params) => {
-   *     // modify state
+   *     // modify state using params.name
    *   }
    * );
    *
@@ -210,13 +191,12 @@ export interface Commander<TStore> {
    * });
    */
   readonly action: {
-    // With params schema
-    <TParamsSchema extends AnyEffectSchema, TReturn = void>(
-      paramsSchema: TParamsSchema,
-      fn: CommandFn<TStore, InferSchemaType<TParamsSchema>, TReturn>
-    ): Command<TStore, InferSchemaType<TParamsSchema>, TReturn>;
+    // With params (explicit type parameter)
+    <TParams, TReturn = void>(
+      fn: CommandFn<TStore, TParams, TReturn>
+    ): Command<TStore, TParams, TReturn>;
 
-    // Without params (void)
+    // Without params (void) - inferred when no type param provided
     <TReturn = void>(
       fn: CommandFn<TStore, void, TReturn>
     ): Command<TStore, void, TReturn>;
@@ -227,8 +207,7 @@ export interface Commander<TStore> {
    * The revert function is called when undoing the command.
    *
    * @example
-   * const moveItem = commander.undoableAction(
-   *   Schema.Struct({ id: Schema.String, toIndex: Schema.Number }),
+   * const moveItem = commander.undoableAction<{ id: string; toIndex: number }, { fromIndex: number }>(
    *   (ctx, params) => {
    *     const fromIndex = // get current index
    *     // perform move
@@ -241,12 +220,11 @@ export interface Commander<TStore> {
    * );
    */
   readonly undoableAction: {
-    // With params schema
-    <TParamsSchema extends AnyEffectSchema, TReturn>(
-      paramsSchema: TParamsSchema,
-      fn: CommandFn<TStore, InferSchemaType<TParamsSchema>, TReturn>,
-      revert: RevertFn<TStore, InferSchemaType<TParamsSchema>, TReturn>
-    ): UndoableCommand<TStore, InferSchemaType<TParamsSchema>, TReturn>;
+    // With params (explicit type parameter)
+    <TParams, TReturn>(
+      fn: CommandFn<TStore, TParams, TReturn>,
+      revert: RevertFn<TStore, TParams, TReturn>
+    ): UndoableCommand<TStore, TParams, TReturn>;
 
     // Without params (void)
     <TReturn>(

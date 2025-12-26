@@ -4,7 +4,6 @@
  * This file defines all the commands for the Kanban board with undo/redo support.
  */
 
-import { Schema } from "effect";
 import { createCommander } from "@voidhash/mimic-react/zustand-commander";
 import { CardNode, ColumnNode } from "@voidhash/mimic-example-shared";
 import type { MimicSlice } from "@voidhash/mimic-react/zustand";
@@ -52,8 +51,7 @@ export const commander = createCommander<KanbanStoreState>();
  * Add a new column to the board.
  * Undoable: removes the column on undo.
  */
-export const addColumn = commander.undoableAction(
-  Schema.Struct({ title: Schema.String }),
+export const addColumn = commander.undoableAction<{title: string}, { columnId: string }>(
   (ctx, params) => {
     const { mimic } = ctx.getState();
     let newColumnId: string | undefined;
@@ -81,8 +79,7 @@ export const addColumn = commander.undoableAction(
  * Rename a column.
  * Undoable: restores the previous name on undo.
  */
-export const renameColumn = commander.undoableAction(
-  Schema.Struct({ columnId: Schema.String, title: Schema.String }),
+export const renameColumn = commander.undoableAction<{columnId: string, title: string}, { previousTitle: string }>(
   (ctx, params) => {
     const { mimic } = ctx.getState();
 
@@ -111,8 +108,7 @@ export const renameColumn = commander.undoableAction(
  * Delete a column.
  * Undoable: restores the column with all its cards on undo.
  */
-export const deleteColumn = commander.undoableAction(
-  Schema.Struct({ columnId: Schema.String }),
+export const deleteColumn = commander.undoableAction<{columnId: string}, { columnData: { name: string; cards: { title: string; description: string }[] } | null, columnIndex: number }>(
   (ctx, params) => {
     const { mimic } = ctx.getState();
 
@@ -182,12 +178,7 @@ export const deleteColumn = commander.undoableAction(
  * Add a new card to a column.
  * Undoable: removes the card on undo.
  */
-export const addCard = commander.undoableAction(
-  Schema.Struct({
-    columnId: Schema.String,
-    title: Schema.String,
-    description: Schema.optional(Schema.String),
-  }),
+export const addCard = commander.undoableAction<{columnId: string, title: string, description?: string}, { cardId: string }>(
   (ctx, params) => {
     const { mimic } = ctx.getState();
     let newCardId: string | undefined;
@@ -214,12 +205,7 @@ export const addCard = commander.undoableAction(
  * Update a card's title and description.
  * Undoable: restores the previous values on undo.
  */
-export const updateCard = commander.undoableAction(
-  Schema.Struct({
-    cardId: Schema.String,
-    title: Schema.String,
-    description: Schema.optional(Schema.String),
-  }),
+export const updateCard = commander.undoableAction<{cardId: string, title: string, description?: string}, { previousTitle: string, previousDescription: string }>(
   (ctx, params) => {
     const { mimic } = ctx.getState();
 
@@ -264,8 +250,7 @@ export const updateCard = commander.undoableAction(
  * Delete a card.
  * Undoable: restores the card at its original position on undo.
  */
-export const deleteCard = commander.undoableAction(
-  Schema.Struct({ cardId: Schema.String }),
+export const deleteCard = commander.undoableAction<{cardId: string}, { cardData: { title: string; description: string } | null, columnId: string | null, cardIndex: number }>(
   (ctx, params) => {
     const { mimic } = ctx.getState();
 
@@ -319,12 +304,7 @@ export const deleteCard = commander.undoableAction(
  * Move a card to a different position or column.
  * Undoable: moves the card back to its original position on undo.
  */
-export const moveCard = commander.undoableAction(
-  Schema.Struct({
-    cardId: Schema.String,
-    destinationColumnId: Schema.String,
-    destinationIndex: Schema.Number,
-  }),
+export const moveCard = commander.undoableAction<{cardId: string, destinationColumnId: string, destinationIndex: number}, { sourceColumnId: string | null, sourceIndex: number }>(
   (ctx, params) => {
     const { mimic } = ctx.getState();
 
@@ -363,11 +343,7 @@ export const moveCard = commander.undoableAction(
  * Reorder a column to a new position.
  * Undoable: moves the column back to its original position on undo.
  */
-export const reorderColumn = commander.undoableAction(
-  Schema.Struct({
-    columnId: Schema.String,
-    destinationIndex: Schema.Number,
-  }),
+export const reorderColumn = commander.undoableAction<{columnId: string, destinationIndex: number}, { sourceIndex: number }>(
   (ctx, params) => {
     const { mimic } = ctx.getState();
 
@@ -400,8 +376,7 @@ export const reorderColumn = commander.undoableAction(
 /**
  * Select a card (local state only, not synced).
  */
-export const selectCard = commander.action(
-  Schema.Struct({ cardId: Schema.NullOr(Schema.String) }),
+export const selectCard = commander.action<{cardId: string | null}>(
   (ctx, params) => {
     ctx.setState({ selectedCardId: params.cardId });
   }

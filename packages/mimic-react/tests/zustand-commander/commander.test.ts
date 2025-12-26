@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createStore, type StoreApi } from "zustand";
-import { Schema } from "effect";
 import {
   createCommander,
   performUndo,
@@ -12,6 +11,7 @@ import {
   UNDOABLE_COMMAND_SYMBOL,
   type CommanderSlice,
   type Command,
+  type CommandContext,
   type UndoableCommand,
 } from "../../src/zustand-commander/index.js";
 
@@ -116,9 +116,8 @@ describe("action (regular commands)", () => {
     store = createTestStore(commander);
   });
 
-  it("should create command with schema + function", () => {
-    const setCount = commander.action(
-      Schema.Struct({ value: Schema.Number }),
+  it("should create command with typed params", () => {
+    const setCount = commander.action<{ value: number }>(
       (ctx, params) => {
         ctx.setState({ count: params.value });
       }
@@ -126,7 +125,6 @@ describe("action (regular commands)", () => {
 
     expect(setCount).toBeDefined();
     expect(setCount[COMMAND_SYMBOL]).toBe(true);
-    expect(setCount.paramsSchema).toBeDefined();
     expect(typeof setCount.fn).toBe("function");
   });
 
@@ -137,13 +135,11 @@ describe("action (regular commands)", () => {
 
     expect(reset).toBeDefined();
     expect(reset[COMMAND_SYMBOL]).toBe(true);
-    expect(reset.paramsSchema).toBeNull();
     expect(typeof reset.fn).toBe("function");
   });
 
   it("should execute command and modify state", () => {
-    const setCount = commander.action(
-      Schema.Struct({ value: Schema.Number }),
+    const setCount = commander.action<{ value: number }>(
       (ctx, params) => {
         ctx.setState({ count: params.value });
       }
@@ -166,8 +162,7 @@ describe("action (regular commands)", () => {
   });
 
   it("should NOT add to undo stack for regular actions", () => {
-    const setCount = commander.action(
-      Schema.Struct({ value: Schema.Number }),
+    const setCount = commander.action<{ value: number }>(
       (ctx, params) => {
         ctx.setState({ count: params.value });
       }
@@ -190,8 +185,7 @@ describe("action (regular commands)", () => {
   });
 
   it("should return value from action", () => {
-    const getDoubled = commander.action(
-      Schema.Struct({ value: Schema.Number }),
+    const getDoubled = commander.action<{ value: number }, number>(
       (_ctx, params) => {
         return params.value * 2;
       }
@@ -220,9 +214,8 @@ describe("undoableAction", () => {
     store = createTestStore(commander);
   });
 
-  it("should create undoable command with schema + fn + revert", () => {
-    const addItem = commander.undoableAction(
-      Schema.Struct({ item: Schema.String }),
+  it("should create undoable command with typed params", () => {
+    const addItem = commander.undoableAction<{ item: string }, { index: number }>(
       (ctx, params) => {
         const items = [...ctx.getState().items, params.item];
         ctx.setState({ items });
@@ -237,13 +230,12 @@ describe("undoableAction", () => {
     expect(addItem).toBeDefined();
     expect(addItem[COMMAND_SYMBOL]).toBe(true);
     expect(addItem[UNDOABLE_COMMAND_SYMBOL]).toBe(true);
-    expect(addItem.paramsSchema).toBeDefined();
     expect(typeof addItem.fn).toBe("function");
     expect(typeof addItem.revert).toBe("function");
   });
 
   it("should create undoable command without params", () => {
-    const increment = commander.undoableAction(
+    const increment = commander.undoableAction<void, { previousCount: number }>(
       (ctx) => {
         const current = ctx.getState().count;
         ctx.setState({ count: current + 1 });
@@ -257,12 +249,10 @@ describe("undoableAction", () => {
     expect(increment).toBeDefined();
     expect(increment[COMMAND_SYMBOL]).toBe(true);
     expect(increment[UNDOABLE_COMMAND_SYMBOL]).toBe(true);
-    expect(increment.paramsSchema).toBeNull();
   });
 
   it("should execute undoable action and modify state", () => {
-    const setCount = commander.undoableAction(
-      Schema.Struct({ value: Schema.Number }),
+    const setCount = commander.undoableAction<{ value: number }, { previousValue: number }>(
       (ctx, params) => {
         const prev = ctx.getState().count;
         ctx.setState({ count: params.value });
@@ -644,16 +634,14 @@ describe("Command Dispatch in Context", () => {
     const commander = createCommander<TestState>();
     const store = createTestStore(commander);
 
-    const addItem = commander.action(
-      Schema.Struct({ item: Schema.String }),
+    const addItem = commander.action<{ item: string }>(
       (ctx, params) => {
         const items = [...ctx.getState().items, params.item];
         ctx.setState({ items });
       }
     );
 
-    const addMultiple = commander.action(
-      Schema.Struct({ items: Schema.Array(Schema.String) }),
+    const addMultiple = commander.action<{ items: string[] }>(
       (ctx, params) => {
         for (const item of params.items) {
           ctx.dispatch(addItem)({ item });
@@ -664,7 +652,7 @@ describe("Command Dispatch in Context", () => {
     const storeApi = store as unknown as StoreApi<TestStore>;
 
     // Create a proper dispatch function
-    const createCtx = (): typeof ctx => ({
+    const createCtx = (): CommandContext<TestStore> => ({
       getState: () => storeApi.getState(),
       setState: (partial: Partial<TestStore>) => storeApi.setState(partial),
       dispatch: <TParams, TReturn>(cmd: Command<TestStore, TParams, TReturn>) => {
@@ -672,7 +660,7 @@ describe("Command Dispatch in Context", () => {
       },
     });
 
-    const ctx = createCtx();
+    const ctx: CommandContext<TestStore> = createCtx();
 
     addMultiple.fn(ctx, { items: ["x", "y", "z"] });
 
@@ -685,8 +673,7 @@ describe("Undo/Redo Integration", () => {
     const commander = createCommander<TestState>();
     const store = createTestStore(commander);
 
-    const setCount = commander.undoableAction(
-      Schema.Struct({ value: Schema.Number }),
+    const setCount = commander.undoableAction<{ value: number }, { previousValue: number }>(
       (ctx, params) => {
         const prev = ctx.getState().count;
         ctx.setState({ count: params.value });
