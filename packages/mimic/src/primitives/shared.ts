@@ -119,7 +119,13 @@ export interface Primitive<TState, TProxy, TRequired extends boolean = false, TH
    */
   export type IsDefined<T> = T extends Primitive<any, any, infer D, any> ? D : false;
 
-  
+  /**
+   * Infer whether a primitive is required.
+   * Alias for IsDefined for clarity.
+   */
+  export type IsRequired<T> = IsDefined<T>;
+
+
   // =============================================================================
   // Validation Errors
   // =============================================================================
