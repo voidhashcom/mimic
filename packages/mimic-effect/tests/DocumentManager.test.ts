@@ -337,4 +337,65 @@ describe("DocumentManager", () => {
       expect(result).toBe(true);
     });
   });
+
+  describe("initial state", () => {
+    const makeTestLayerWithInitial = (initial: { title?: string; count?: number }) => {
+      const configLayer = MimicConfig.layer({
+        schema: TestSchema,
+        maxTransactionHistory: 100,
+        initial,
+      });
+
+      return DocumentManager.layer.pipe(
+        Layer.provide(configLayer),
+        Layer.provide(InMemoryDataStorage.layer)
+      );
+    };
+
+    it("should use initial state for new documents", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const manager = yield* DocumentManager.DocumentManagerTag;
+          return yield* manager.getSnapshot("new-doc");
+        }).pipe(Effect.provide(makeTestLayerWithInitial({ title: "Initial Title", count: 42 })))
+      );
+
+      expect(result.type).toBe("snapshot");
+      expect(result.version).toBe(0);
+      expect(result.state).toEqual({ title: "Initial Title", count: 42 });
+    });
+
+    it("should apply defaults for omitted fields in initial state", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const manager = yield* DocumentManager.DocumentManagerTag;
+          return yield* manager.getSnapshot("new-doc");
+        }).pipe(Effect.provide(makeTestLayerWithInitial({ title: "Only Title" })))
+      );
+
+      expect(result.type).toBe("snapshot");
+      // count should be 0 (default)
+      expect(result.state).toEqual({ title: "Only Title", count: 0 });
+    });
+
+    it("should prefer stored state over initial state", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const manager = yield* DocumentManager.DocumentManagerTag;
+
+          // Apply a transaction to modify the document
+          const tx = createValidTransaction("tx-1", "Modified Title");
+          yield* manager.submit("doc-1", tx);
+
+          // Get snapshot - should show modified state, not initial
+          return yield* manager.getSnapshot("doc-1");
+        }).pipe(Effect.provide(makeTestLayerWithInitial({ title: "Initial Title", count: 42 })))
+      );
+
+      expect(result.type).toBe("snapshot");
+      expect((result.state as any).title).toBe("Modified Title");
+      // count should still be 42 since we only modified title
+      expect((result.state as any).count).toBe(42);
+    });
+  });
 });

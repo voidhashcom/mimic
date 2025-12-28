@@ -6,7 +6,7 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import type { DurationInput } from "effect/Duration";
 import * as Layer from "effect/Layer";
-import type { Primitive, Presence } from "@voidhash/mimic";
+import { Primitive, Presence } from "@voidhash/mimic";
 
 // =============================================================================
 // Mimic Server Configuration
@@ -54,6 +54,13 @@ export interface MimicServerConfig<TSchema extends Primitive.AnyPrimitive = Prim
    * @default undefined (presence disabled)
    */
   readonly presence: Presence.AnyPresence | undefined;
+
+  /**
+   * Initial state for new documents.
+   * Used when a document is created and no existing state is found in storage.
+   * @default undefined (documents start empty)
+   */
+  readonly initial: Primitive.InferState<TSchema> | undefined;
 }
 
 /**
@@ -95,6 +102,17 @@ export interface MimicServerConfigOptions<TSchema extends Primitive.AnyPrimitive
    * @default undefined (presence disabled)
    */
   readonly presence?: Presence.AnyPresence;
+
+  /**
+   * Initial state for new documents.
+   * Used when a document is created and no existing state is found in storage.
+   *
+   * Type-safe: required fields (without defaults) must be provided,
+   * while optional fields and fields with defaults can be omitted.
+   *
+   * @default undefined (documents start empty or use schema defaults)
+   */
+  readonly initial?: Primitive.InferSetInput<TSchema>;
 }
 
 /**
@@ -109,6 +127,9 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   heartbeatInterval: Duration.decode(options.heartbeatInterval ?? "30 seconds"),
   heartbeatTimeout: Duration.decode(options.heartbeatTimeout ?? "10 seconds"),
   presence: options.presence,
+  initial: options.initial !== undefined
+    ? Primitive.applyDefaults(options.schema, options.initial as Partial<Primitive.InferState<TSchema>>)
+    : undefined,
 });
 
 // =============================================================================

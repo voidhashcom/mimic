@@ -220,4 +220,96 @@ describe("MimicServer", () => {
       });
     });
   });
+
+  describe("initial state support", () => {
+    describe("layer", () => {
+      it("should accept initial option", async () => {
+        const testLayer = MimicServer.layer({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          initial: { title: "My Document", completed: false },
+        });
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const handler = yield* MimicServer.MimicWebSocketHandler;
+            return typeof handler === "function";
+          }).pipe(Effect.provide(testLayer))
+        );
+
+        expect(result).toBe(true);
+      });
+
+      it("should work with initial and all other options", async () => {
+        const testLayer = MimicServer.layer({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          maxTransactionHistory: 500,
+          initial: { title: "Full Options" }, // completed has default of false
+        });
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const handler = yield* MimicServer.MimicWebSocketHandler;
+            return typeof handler === "function";
+          }).pipe(Effect.provide(testLayer))
+        );
+
+        expect(result).toBe(true);
+      });
+    });
+
+    describe("layerHttpLayerRouter", () => {
+      it("should accept initial option", () => {
+        const routeLayer = MimicServer.layerHttpLayerRouter({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          initial: { title: "My Document", completed: true },
+        });
+
+        expect(routeLayer).toBeDefined();
+      });
+
+      it("should work with initial and all other options", () => {
+        const customAuthLayer = MimicAuthService.layer({
+          authHandler: (token) => ({ success: true, userId: token }),
+        });
+
+        const routeLayer = MimicServer.layerHttpLayerRouter({
+          basePath: "/mimic/test",
+          schema: TestSchema,
+          initial: { title: "Full Options" },
+          maxTransactionHistory: 500,
+          authLayer: customAuthLayer,
+          storageLayer: InMemoryDataStorage.layer,
+        });
+
+        expect(routeLayer).toBeDefined();
+      });
+    });
+
+    describe("MimicLayerOptions with initial", () => {
+      it("should accept initial in options", () => {
+        const options: MimicServer.MimicLayerOptions<typeof TestSchema> = {
+          schema: TestSchema,
+          basePath: "/custom/path",
+          initial: { title: "Initial State", completed: true },
+        };
+
+        expect(options.schema).toBe(TestSchema);
+        expect(options.basePath).toBe("/custom/path");
+        expect(options.initial).toEqual({ title: "Initial State", completed: true });
+      });
+
+      it("should allow omitting optional fields in initial (type safety)", () => {
+        // This test verifies that TypeScript allows omitting fields with defaults
+        const options: MimicServer.MimicLayerOptions<typeof TestSchema> = {
+          schema: TestSchema,
+          initial: { title: "Only Title" }, // completed is optional because it has a default
+        };
+
+        expect(options.initial).toEqual({ title: "Only Title" });
+      });
+    });
+  });
 });

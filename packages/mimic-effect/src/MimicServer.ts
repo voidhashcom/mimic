@@ -47,8 +47,17 @@ export interface MimicLayerOptions<TSchema extends Primitive.AnyPrimitive> {
    * When provided, enables presence features on WebSocket connections.
    */
   readonly presence?: Presence.AnyPresence;
+  /**
+   * Initial state for new documents.
+   * Used when a document is created and no existing state is found in storage.
+   *
+   * Type-safe: required fields (without defaults) must be provided,
+   * while optional fields and fields with defaults can be omitted.
+   *
+   * @default undefined (documents start empty or use schema defaults)
+   */
+  readonly initial?: Primitive.InferSetInput<TSchema>;
 }
-
 
 
 /**
@@ -179,6 +188,7 @@ export const layerHttpLayerRouter = <TSchema extends Primitive.AnyPrimitive>(
     schema: options.schema,
     maxTransactionHistory: options.maxTransactionHistory,
     presence: options.presence,
+    initial: options.initial,
   });
 
   // Use provided layers or defaults
