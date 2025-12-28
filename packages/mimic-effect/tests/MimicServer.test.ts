@@ -222,43 +222,6 @@ describe("MimicServer", () => {
   });
 
   describe("initial state support", () => {
-    describe("layer", () => {
-      it("should accept initial option", async () => {
-        const testLayer = MimicServer.layer({
-          basePath: "/mimic/test",
-          schema: TestSchema,
-          initial: { title: "My Document", completed: false },
-        });
-
-        const result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const handler = yield* MimicServer.MimicWebSocketHandler;
-            return typeof handler === "function";
-          }).pipe(Effect.provide(testLayer))
-        );
-
-        expect(result).toBe(true);
-      });
-
-      it("should work with initial and all other options", async () => {
-        const testLayer = MimicServer.layer({
-          basePath: "/mimic/test",
-          schema: TestSchema,
-          maxTransactionHistory: 500,
-          initial: { title: "Full Options" }, // completed has default of false
-        });
-
-        const result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const handler = yield* MimicServer.MimicWebSocketHandler;
-            return typeof handler === "function";
-          }).pipe(Effect.provide(testLayer))
-        );
-
-        expect(result).toBe(true);
-      });
-    });
-
     describe("layerHttpLayerRouter", () => {
       it("should accept initial option", () => {
         const routeLayer = MimicServer.layerHttpLayerRouter({
