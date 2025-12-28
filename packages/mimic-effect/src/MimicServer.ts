@@ -21,20 +21,6 @@ import { HttpLayerRouter, HttpServerRequest, HttpServerResponse } from "@effect/
 import { PathInput } from "@effect/platform/HttpRouter";
 
 // =============================================================================
-// Handler Tag
-// =============================================================================
-
-/**
- * Tag for the WebSocket handler function.
- */
-export class MimicWebSocketHandler extends Context.Tag(
-  "@voidhash/mimic-server-effect/MimicWebSocketHandler"
-)<
-  MimicWebSocketHandler,
-  (socket: Socket.Socket, documentId: string) => Effect.Effect<void, unknown>
->() {}
-
-// =============================================================================
 // Layer Composition Options
 // =============================================================================
 
@@ -63,119 +49,7 @@ export interface MimicLayerOptions<TSchema extends Primitive.AnyPrimitive> {
   readonly presence?: Presence.AnyPresence;
 }
 
-// =============================================================================
-// Layer Composition
-// =============================================================================
 
-/**
- * Create a Mimic WebSocket handler layer.
- * 
- * This layer provides a handler function that can be used with any WebSocket server
- * implementation. The handler takes a socket and document ID and manages the
- * document synchronization.
- * 
- * By default, uses in-memory storage and no authentication.
- * Override these by providing MimicDataStorage and MimicAuthService layers.
- * 
- * @example
- * ```typescript
- * import { MimicServer, MimicAuthService } from "@voidhash/mimic-effect";
- * import { Primitive } from "@voidhash/mimic";
- * 
- * const TodoSchema = Primitive.Struct({
- *   title: Primitive.String(),
- *   completed: Primitive.Boolean(),
- * });
- * 
- * // Create the handler layer with defaults
- * const HandlerLayer = MimicServer.layer({
- *   basePath: "/mimic/todo",
- *   schema: TodoSchema
- * });
- * 
- * // Or with custom auth
- * const HandlerLayerWithAuth = MimicServer.layer({
- *   basePath: "/mimic/todo",
- *   schema: TodoSchema
- * }).pipe(
- *   Layer.provideMerge(MimicAuthService.layer({
- *     authHandler: (token) => ({ success: true, userId: "user-123" })
- *   }))
- * );
- * ```
- */
-export const layer = <TSchema extends Primitive.AnyPrimitive>(
-  options: MimicLayerOptions<TSchema>
-): Layer.Layer<MimicWebSocketHandler | DocumentManager.DocumentManagerTag> => {
-  const configLayer = MimicConfig.layer({
-    schema: options.schema,
-    maxTransactionHistory: options.maxTransactionHistory,
-    presence: options.presence,
-  });
-
-  return Layer.merge(
-    // Handler layer
-    Layer.effect(MimicWebSocketHandler, WebSocketHandler.makeHandler).pipe(
-      Layer.provide(DocumentManager.layer),
-      Layer.provide(PresenceManager.layer),
-      Layer.provide(configLayer)
-    ),
-    // Document manager layer
-    DocumentManager.layer.pipe(Layer.provide(configLayer))
-  ).pipe(
-    // Provide defaults if not overridden
-    Layer.provide(InMemoryDataStorage.layerDefault),
-    Layer.provide(NoAuth.layerDefault)
-  );
-};
-
-/**
- * Create the Mimic server handler layer.
- * This layer provides the WebSocket handler that can be used with any WebSocket server.
- *
- * @example
- * ```typescript
- * import { MimicServer } from "@voidhash/mimic-server-effect";
- * import { SocketServer } from "@effect/platform/SocketServer";
- * import { Primitive } from "@voidhash/mimic";
- *
- * // Define your document schema
- * const TodoSchema = Primitive.Struct({
- *   title: Primitive.String(),
- *   completed: Primitive.Boolean(),
- * });
- *
- * // Create the server layer
- * const serverLayer = MimicServer.handlerLayer({
- *   schema: TodoSchema,
- * });
- *
- * // Run with your socket server
- * Effect.gen(function* () {
- *   const handler = yield* MimicServer.MimicWebSocketHandler;
- *   const server = yield* SocketServer;
- *
- *   yield* server.run((socket) =>
- *     // Extract document ID from request and call handler
- *     handler(socket, "my-document-id")
- *   );
- * }).pipe(
- *   Effect.provide(serverLayer),
- *   Effect.provide(YourSocketServerLayer),
- * );
- * ```
- */
-export const handlerLayer = <TSchema extends Primitive.AnyPrimitive>(
-  options: MimicConfig.MimicServerConfigOptions<TSchema>
-): Layer.Layer<MimicWebSocketHandler> =>
-  Layer.effect(MimicWebSocketHandler, WebSocketHandler.makeHandler).pipe(
-    Layer.provide(DocumentManager.layer),
-    Layer.provide(PresenceManager.layer),
-    Layer.provide(MimicConfig.layer(options)),
-    // Provide defaults
-    Layer.provide(InMemoryDataStorage.layerDefault),
-    Layer.provide(NoAuth.layerDefault)
-  );
 
 /**
  * Create the document manager layer.
@@ -189,40 +63,6 @@ export const documentManagerLayer = <TSchema extends Primitive.AnyPrimitive>(
     Layer.provide(InMemoryDataStorage.layerDefault),
     Layer.provide(NoAuth.layerDefault)
   );
-
-// =============================================================================
-// Convenience Functions
-// =============================================================================
-
-/**
- * Run a Mimic WebSocket server with the provided handler.
- *
- * This is a helper that:
- * 1. Gets the WebSocket handler from context
- * 2. Runs the socket server with the handler
- *
- * Note: The document ID extraction from socket is implementation-specific.
- * You may need to customize this based on your socket server.
- */
-export const run = (
-  extractDocumentId: (socket: Socket.Socket) => Effect.Effect<string>
-) =>
-  Effect.gen(function* () {
-    const handler = yield* MimicWebSocketHandler;
-    const server = yield* SocketServer;
-
-    yield* server.run((socket) =>
-      Effect.gen(function* () {
-        const documentId = yield* extractDocumentId(socket);
-        yield* handler(socket, documentId);
-      }).pipe(
-        Effect.catchAll((error) =>
-          Effect.logError("Connection error", error)
-        )
-      )
-    );
-  });
-
 
 /**
  * Create the HTTP handler effect for WebSocket upgrade.

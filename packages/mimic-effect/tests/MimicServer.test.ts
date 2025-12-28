@@ -21,84 +21,6 @@ const TestSchema = Primitive.Struct({
 // =============================================================================
 
 describe("MimicServer", () => {
-  describe("layer", () => {
-    it("should create a layer with default auth and storage", async () => {
-      const testLayer = MimicServer.layer({
-        basePath: "/mimic/test",
-        schema: TestSchema,
-      });
-
-      // Verify the layer provides the expected services
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const handler = yield* MimicServer.MimicWebSocketHandler;
-          return typeof handler === "function";
-        }).pipe(Effect.provide(testLayer))
-      );
-
-      expect(result).toBe(true);
-    });
-
-    it("should allow custom auth layer to be provided", async () => {
-      let authCalled = false;
-
-      const customAuthLayer = MimicAuthService.layer({
-        authHandler: (token) => {
-          authCalled = true;
-          return { success: true, userId: token };
-        },
-      });
-
-      const testLayer = MimicServer.layer({
-        basePath: "/mimic/test",
-        schema: TestSchema,
-      }).pipe(Layer.provideMerge(customAuthLayer));
-
-      // Verify the layer compiles with custom auth
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const handler = yield* MimicServer.MimicWebSocketHandler;
-          return typeof handler === "function";
-        }).pipe(Effect.provide(testLayer))
-      );
-
-      expect(result).toBe(true);
-    });
-
-    it("should support maxTransactionHistory option", async () => {
-      const testLayer = MimicServer.layer({
-        basePath: "/mimic/test",
-        schema: TestSchema,
-        maxTransactionHistory: 500,
-      });
-
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const handler = yield* MimicServer.MimicWebSocketHandler;
-          return typeof handler === "function";
-        }).pipe(Effect.provide(testLayer))
-      );
-
-      expect(result).toBe(true);
-    });
-  });
-
-  describe("handlerLayer", () => {
-    it("should create a layer that provides MimicWebSocketHandler", async () => {
-      const testLayer = MimicServer.handlerLayer({
-        schema: TestSchema,
-      });
-
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const handler = yield* MimicServer.MimicWebSocketHandler;
-          return typeof handler === "function";
-        }).pipe(Effect.provide(testLayer))
-      );
-
-      expect(result).toBe(true);
-    });
-  });
 
   describe("documentManagerLayer", () => {
     it("should create a layer that provides DocumentManager", async () => {
@@ -187,14 +109,6 @@ describe("MimicServer", () => {
     });
   });
 
-  describe("MimicWebSocketHandler tag", () => {
-    it("should have the correct tag identifier", () => {
-      expect(MimicServer.MimicWebSocketHandler.key).toBe(
-        "@voidhash/mimic-server-effect/MimicWebSocketHandler"
-      );
-    });
-  });
-
   describe("MimicLayerOptions", () => {
     it("should accept all optional properties", () => {
       // TypeScript compile-time check - if this compiles, the interface is correct
@@ -227,82 +141,6 @@ describe("MimicServer", () => {
         y: Schema.Number,
         name: Schema.optional(Schema.String),
       }),
-    });
-
-    describe("layer", () => {
-      it("should accept presence option", async () => {
-        const testLayer = MimicServer.layer({
-          basePath: "/mimic/test",
-          schema: TestSchema,
-          presence: CursorPresence,
-        });
-
-        const result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const handler = yield* MimicServer.MimicWebSocketHandler;
-            return typeof handler === "function";
-          }).pipe(Effect.provide(testLayer))
-        );
-
-        expect(result).toBe(true);
-      });
-
-      it("should work with presence and custom auth", async () => {
-        const customAuthLayer = MimicAuthService.layer({
-          authHandler: (token) => ({ success: true, userId: token }),
-        });
-
-        const testLayer = MimicServer.layer({
-          basePath: "/mimic/test",
-          schema: TestSchema,
-          presence: CursorPresence,
-        }).pipe(Layer.provideMerge(customAuthLayer));
-
-        const result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const handler = yield* MimicServer.MimicWebSocketHandler;
-            return typeof handler === "function";
-          }).pipe(Effect.provide(testLayer))
-        );
-
-        expect(result).toBe(true);
-      });
-
-      it("should work with presence and maxTransactionHistory", async () => {
-        const testLayer = MimicServer.layer({
-          basePath: "/mimic/test",
-          schema: TestSchema,
-          presence: CursorPresence,
-          maxTransactionHistory: 500,
-        });
-
-        const result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const handler = yield* MimicServer.MimicWebSocketHandler;
-            return typeof handler === "function";
-          }).pipe(Effect.provide(testLayer))
-        );
-
-        expect(result).toBe(true);
-      });
-    });
-
-    describe("handlerLayer", () => {
-      it("should accept presence option", async () => {
-        const testLayer = MimicServer.handlerLayer({
-          schema: TestSchema,
-          presence: CursorPresence,
-        });
-
-        const result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const handler = yield* MimicServer.MimicWebSocketHandler;
-            return typeof handler === "function";
-          }).pipe(Effect.provide(testLayer))
-        );
-
-        expect(result).toBe(true);
-      });
     });
 
     describe("documentManagerLayer", () => {
