@@ -11,3 +11,5 @@ export * as ProxyEnvironment from "./ProxyEnvironment.js";
 export * as Transform from "./Transform.js";
 export * as Presence from "./Presence.js";
 export * as EffectSchema from "./EffectSchema.js";
+export * as Types from "./types/index.js";
+export * as TreeHelpers from "./utils/tree-helpers.js";
