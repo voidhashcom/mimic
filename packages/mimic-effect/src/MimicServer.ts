@@ -328,7 +328,7 @@ export const layerHttpLayerRouter = <TSchema extends Primitive.AnyPrimitive>(
     /** Custom storage layer. Defaults to InMemoryDataStorage. */
     readonly storageLayer?: Layer.Layer<MimicDataStorageTag>;
   }
-): Layer.Layer<never, never, HttpLayerRouter.HttpRouter> => {
+) => {
   // Build the base path pattern for WebSocket routes
   // Append /doc/* to match /basePath/doc/{documentId}
   const basePath = options.basePath ?? "/mimic";
