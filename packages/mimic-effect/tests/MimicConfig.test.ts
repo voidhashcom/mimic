@@ -172,4 +172,76 @@ describe("MimicConfig", () => {
       expect(config.presence).toBe(CursorPresence);
     });
   });
+
+  describe("initial state configuration", () => {
+    it("should have undefined initial state by default", () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+      });
+
+      expect(config.initial).toBeUndefined();
+    });
+
+    it("should accept initial state option", () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+        initial: { title: "My Document", count: 42 },
+      });
+
+      expect(config.initial).toEqual({ title: "My Document", count: 42 });
+    });
+
+    it("should apply defaults for omitted fields in initial state", () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+        initial: { title: "My Document" }, // count has default of 0
+      });
+
+      expect(config.initial).toEqual({ title: "My Document", count: 0 });
+    });
+
+    it("should provide initial state through layer", async () => {
+      const testLayer = MimicConfig.layer({
+        schema: TestSchema,
+        initial: { title: "From Layer", count: 100 },
+      });
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const config = yield* MimicConfig.MimicServerConfigTag;
+          return config.initial;
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(result).toEqual({ title: "From Layer", count: 100 });
+    });
+
+    it("should work with schema that has required fields without defaults", () => {
+      const SchemaWithRequired = Primitive.Struct({
+        name: Primitive.String().required(),
+        optional: Primitive.String().default("default"),
+      });
+
+      const config = MimicConfig.make({
+        schema: SchemaWithRequired,
+        initial: { name: "Required Name" },
+      });
+
+      expect(config.initial).toEqual({ name: "Required Name", optional: "default" });
+    });
+
+    it("should work with all options including initial", () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+        maxIdleTime: "10 minutes",
+        maxTransactionHistory: 500,
+        initial: { title: "Full Options", count: 999 },
+      });
+
+      expect(config.schema).toBe(TestSchema);
+      expect(Duration.toMillis(config.maxIdleTime)).toBe(10 * 60 * 1000);
+      expect(config.maxTransactionHistory).toBe(500);
+      expect(config.initial).toEqual({ title: "Full Options", count: 999 });
+    });
+  });
 });
