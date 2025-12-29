@@ -484,16 +484,14 @@ export const make = <
 
   /**
    * Adds a transaction to pending queue and sends to server.
+   * If disconnected, the transport will queue it for later submission.
    */
   const submitTransaction = (tx: Transaction.Transaction): void => {
-    if (!transport.isConnected()) {
-      throw new NotConnectedError();
-    }
-
     debugLog("submitTransaction", {
       txId: tx.id,
       ops: tx.ops,
       pendingCount: _pending.length + 1,
+      isConnected: transport.isConnected(),
     });
 
     const pending: PendingTransaction = {
@@ -504,15 +502,18 @@ export const make = <
 
     _pending.push(pending);
 
-    // Set timeout for this transaction
-    const timeoutHandle = setTimeout(() => {
-      handleTransactionTimeout(tx.id);
-    }, transactionTimeout);
-    _timeoutHandles.set(tx.id, timeoutHandle);
+    // Only set timeout if connected - otherwise the transport queues it
+    // and the timeout will start when the message is actually sent on reconnect
+    if (transport.isConnected()) {
+      const timeoutHandle = setTimeout(() => {
+        handleTransactionTimeout(tx.id);
+      }, transactionTimeout);
+      _timeoutHandles.set(tx.id, timeoutHandle);
+    }
 
-    // Send to server
+    // Send to server (transport queues if disconnected)
     transport.send(tx);
-    debugLog("submitTransaction: sent to server", { txId: tx.id });
+    debugLog("submitTransaction: sent to transport", { txId: tx.id, queued: !transport.isConnected() });
   };
 
   /**
@@ -937,10 +938,8 @@ export const make = <
         pendingCount: _pending.length,
       });
 
-      if (!transport.isConnected()) {
-        throw new NotConnectedError();
-      }
-
+      // Allow transactions even when disconnected - they will be queued
+      // Only require that we have been initialized at least once (have server state)
       if (_initState.type !== "ready") {
         throw new InvalidStateError("Client is not ready. Wait for initialization to complete.");
       }

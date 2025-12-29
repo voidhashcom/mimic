@@ -201,18 +201,325 @@ describe("ClientDocument", () => {
       expect(transport.sentTransactions[0]!.ops[0]!.kind).toBe("number.set");
     });
 
-    it("should throw when not connected", () => {
+    it("should queue transactions when not connected", () => {
       const client = ClientDocument.make({
         schema: TestSchema,
         transport,
         initialState: { title: "", count: 0, items: [] },
       });
 
+      // Transactions should work offline - they get queued in the transport
+      client.transaction((root) => {
+        root.title.set("Test");
+      });
+
+      // State should be optimistically updated
+      expect(client.get()?.title).toBe("Test");
+      // Transaction is pending
+      expect(client.hasPendingChanges()).toBe(true);
+      // Transaction was sent to transport (it will queue it)
+      expect(transport.sentTransactions.length).toBe(1);
+    });
+
+    it("should queue multiple transactions when not connected", () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+      });
+
+      // Create multiple transactions while offline
+      client.transaction((root) => {
+        root.title.set("First");
+      });
+
+      client.transaction((root) => {
+        root.count.set(10);
+      });
+
+      client.transaction((root) => {
+        root.title.set("Second");
+      });
+
+      // All state changes should be applied optimistically
+      expect(client.get()?.title).toBe("Second");
+      expect(client.get()?.count).toBe(10);
+      // All transactions are pending
+      expect(client.getPendingCount()).toBe(3);
+      // All transactions were sent to transport
+      expect(transport.sentTransactions.length).toBe(3);
+    });
+
+    it("should throw when not ready (no initial state)", () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        // No initial state - client is not ready until snapshot received
+      });
+
       expect(() => {
         client.transaction((root) => {
           root.title.set("Test");
         });
-      }).toThrow("Transport is not connected");
+      }).toThrow("Client is not ready");
+    });
+  });
+
+  describe("offline transaction handling", () => {
+    it("should confirm queued transactions after reconnection", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+      });
+
+      // Create transaction while offline
+      client.transaction((root) => {
+        root.title.set("Offline Change");
+      });
+
+      expect(client.hasPendingChanges()).toBe(true);
+      const pendingTx = transport.sentTransactions[0]!;
+
+      // Connect and simulate server confirming the transaction
+      await client.connect();
+
+      // Server broadcasts our transaction (confirming it)
+      transport.simulateServerMessage({
+        type: "transaction",
+        transaction: pendingTx,
+        version: 1,
+      });
+
+      // Transaction should be confirmed
+      expect(client.hasPendingChanges()).toBe(false);
+      expect(client.get()?.title).toBe("Offline Change");
+      expect(client.getServerState()?.title).toBe("Offline Change");
+    });
+
+    it("should handle multiple queued transactions being confirmed in order", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+      });
+
+      // Create multiple transactions while offline
+      client.transaction((root) => {
+        root.title.set("First");
+      });
+
+      client.transaction((root) => {
+        root.count.set(42);
+      });
+
+      expect(client.getPendingCount()).toBe(2);
+      const tx1 = transport.sentTransactions[0]!;
+      const tx2 = transport.sentTransactions[1]!;
+
+      // Connect
+      await client.connect();
+
+      // Server confirms first transaction
+      transport.simulateServerMessage({
+        type: "transaction",
+        transaction: tx1,
+        version: 1,
+      });
+
+      expect(client.getPendingCount()).toBe(1);
+      expect(client.getServerState()?.title).toBe("First");
+
+      // Server confirms second transaction
+      transport.simulateServerMessage({
+        type: "transaction",
+        transaction: tx2,
+        version: 2,
+      });
+
+      expect(client.getPendingCount()).toBe(0);
+      expect(client.getServerState()?.count).toBe(42);
+    });
+
+    it("should handle rejection of queued transactions", async () => {
+      let rejectedTx: Transaction.Transaction | null = null;
+      let rejectionReason: string | null = null;
+
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "Original", count: 0, items: [] },
+        onRejection: (tx, reason) => {
+          rejectedTx = tx;
+          rejectionReason = reason;
+        },
+      });
+
+      // Create transaction while offline
+      client.transaction((root) => {
+        root.title.set("Offline Change");
+      });
+
+      const pendingTx = transport.sentTransactions[0]!;
+
+      // Connect
+      await client.connect();
+
+      // Server rejects the transaction
+      transport.simulateServerMessage({
+        type: "error",
+        transactionId: pendingTx.id,
+        reason: "Conflict with another user",
+      });
+
+      // Transaction should be removed from pending
+      expect(client.hasPendingChanges()).toBe(false);
+      // Optimistic state should revert to server state
+      expect(client.get()?.title).toBe("Original");
+      // Rejection callback should be called
+      expect(rejectedTx).not.toBeNull();
+      expect(rejectionReason).toBe("Conflict with another user");
+    });
+
+    it("should rebase queued transactions against concurrent server changes", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+      });
+
+      // Create transaction while offline
+      client.transaction((root) => {
+        root.title.set("My Title");
+      });
+
+      await client.connect();
+
+      // Another user's change comes in first
+      const otherUserTx = Transaction.make([
+        {
+          kind: "number.set" as const,
+          path: OperationPath.make("count"),
+          payload: 100,
+        },
+      ]);
+
+      transport.simulateServerMessage({
+        type: "transaction",
+        transaction: otherUserTx,
+        version: 1,
+      });
+
+      // Our transaction should still be pending
+      expect(client.hasPendingChanges()).toBe(true);
+      // Server state should reflect other user's change
+      expect(client.getServerState()?.count).toBe(100);
+      // Optimistic state should have both changes
+      expect(client.get()?.count).toBe(100);
+      expect(client.get()?.title).toBe("My Title");
+    });
+
+    it("should work with disconnect and reconnect cycle", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+      });
+
+      // Connect first
+      await client.connect();
+
+      client.transaction((root) => {
+        root.title.set("Online Change");
+      });
+
+      // Disconnect
+      client.disconnect();
+
+      // Create transaction while disconnected
+      client.transaction((root) => {
+        root.count.set(50);
+      });
+
+      // State should still be optimistically updated
+      expect(client.get()?.title).toBe("Online Change");
+      expect(client.get()?.count).toBe(50);
+      expect(client.getPendingCount()).toBe(2);
+
+      // Reconnect
+      await client.connect();
+
+      // Server confirms both transactions
+      transport.simulateServerMessage({
+        type: "transaction",
+        transaction: transport.sentTransactions[0]!,
+        version: 1,
+      });
+
+      transport.simulateServerMessage({
+        type: "transaction",
+        transaction: transport.sentTransactions[1]!,
+        version: 2,
+      });
+
+      expect(client.hasPendingChanges()).toBe(false);
+      expect(client.getServerState()?.title).toBe("Online Change");
+      expect(client.getServerState()?.count).toBe(50);
+    });
+
+    it("should preserve pending transactions during brief disconnection", async () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+      });
+
+      await client.connect();
+
+      // Create a transaction
+      client.transaction((root) => {
+        root.title.set("Before Disconnect");
+      });
+
+      const pendingCount = client.getPendingCount();
+      expect(pendingCount).toBe(1);
+
+      // Simulate brief disconnection
+      client.disconnect();
+
+      // Pending transactions should still be there
+      expect(client.getPendingCount()).toBe(pendingCount);
+      expect(client.get()?.title).toBe("Before Disconnect");
+    });
+
+    it("should handle multiple field changes while offline", () => {
+      const client = ClientDocument.make({
+        schema: TestSchema,
+        transport,
+        initialState: { title: "", count: 0, items: [] },
+      });
+
+      // Create multiple transactions affecting different fields while offline
+      client.transaction((root) => {
+        root.title.set("First Title");
+      });
+
+      client.transaction((root) => {
+        root.count.set(10);
+      });
+
+      client.transaction((root) => {
+        root.title.set("Final Title");
+        root.count.set(20);
+      });
+
+      // All changes should be applied optimistically
+      expect(client.get()?.title).toBe("Final Title");
+      expect(client.get()?.count).toBe(20);
+
+      // All transactions queued
+      expect(transport.sentTransactions.length).toBe(3);
+      expect(client.getPendingCount()).toBe(3);
     });
   });
 

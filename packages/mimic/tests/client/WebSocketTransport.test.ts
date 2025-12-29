@@ -349,6 +349,196 @@ describe("WebSocketTransport", () => {
       const sent = JSON.parse(newWs.sentMessages[1]!);
       expect(sent.type).toBe("submit");
     });
+
+    it("should queue messages when disconnected (never connected)", () => {
+      const transport = WebSocketTransport.make({
+        url: "ws://localhost:8080",
+      });
+
+      // Queue message before connecting
+      const tx = Transaction.make([
+        {
+          kind: "string.set" as const,
+          path: OperationPath.make("title"),
+          payload: "offline",
+        },
+      ]);
+      transport.send(tx);
+
+      // No WebSocket created yet
+      expect(MockWebSocket.instances.length).toBe(0);
+
+      // Message should be queued internally
+      // (We can't directly verify the queue, but we can verify it's sent after connect)
+    });
+
+    it("should send queued messages after initial connection", async () => {
+      const transport = WebSocketTransport.make({
+        url: "ws://localhost:8080",
+      });
+
+      // Queue messages before connecting
+      const tx1 = Transaction.make([
+        {
+          kind: "string.set" as const,
+          path: OperationPath.make("title"),
+          payload: "first",
+        },
+      ]);
+      const tx2 = Transaction.make([
+        {
+          kind: "number.set" as const,
+          path: OperationPath.make("count"),
+          payload: 42,
+        },
+      ]);
+      transport.send(tx1);
+      transport.send(tx2);
+
+      // Now connect
+      const connectPromise = transport.connect();
+      const ws = MockWebSocket.getLatest()!;
+      await ws.simulateOpenWithAuth();
+      await connectPromise;
+
+      // Should have sent: auth + 2 queued transactions
+      expect(ws.sentMessages.length).toBe(3);
+
+      const authMsg = JSON.parse(ws.sentMessages[0]!);
+      expect(authMsg.type).toBe("auth");
+
+      const sent1 = JSON.parse(ws.sentMessages[1]!);
+      expect(sent1.type).toBe("submit");
+      expect(sent1.transaction.id).toBe(tx1.id);
+
+      const sent2 = JSON.parse(ws.sentMessages[2]!);
+      expect(sent2.type).toBe("submit");
+      expect(sent2.transaction.id).toBe(tx2.id);
+    });
+
+    it("should queue multiple messages during disconnection", async () => {
+      const transport = WebSocketTransport.make({
+        url: "ws://localhost:8080",
+        autoReconnect: true,
+      });
+
+      const connectPromise = transport.connect();
+      const ws = MockWebSocket.getLatest()!;
+      await ws.simulateOpenWithAuth();
+      await connectPromise;
+
+      // Simulate connection lost
+      ws.simulateClose(1006, "Connection lost");
+
+      // Queue multiple messages during disconnection
+      const tx1 = Transaction.make([
+        {
+          kind: "string.set" as const,
+          path: OperationPath.make("title"),
+          payload: "change1",
+        },
+      ]);
+      const tx2 = Transaction.make([
+        {
+          kind: "string.set" as const,
+          path: OperationPath.make("title"),
+          payload: "change2",
+        },
+      ]);
+      const tx3 = Transaction.make([
+        {
+          kind: "number.set" as const,
+          path: OperationPath.make("count"),
+          payload: 100,
+        },
+      ]);
+
+      transport.send(tx1);
+      transport.send(tx2);
+      transport.send(tx3);
+
+      // Reconnect
+      vi.advanceTimersByTime(1000);
+      const newWs = MockWebSocket.getLatest()!;
+      await newWs.simulateOpenWithAuth();
+
+      // Should have sent: auth + 3 queued transactions
+      expect(newWs.sentMessages.length).toBe(4);
+
+      const authMsg = JSON.parse(newWs.sentMessages[0]!);
+      expect(authMsg.type).toBe("auth");
+
+      // Verify all transactions were sent in order
+      const sent1 = JSON.parse(newWs.sentMessages[1]!);
+      expect(sent1.transaction.id).toBe(tx1.id);
+
+      const sent2 = JSON.parse(newWs.sentMessages[2]!);
+      expect(sent2.transaction.id).toBe(tx2.id);
+
+      const sent3 = JSON.parse(newWs.sentMessages[3]!);
+      expect(sent3.transaction.id).toBe(tx3.id);
+    });
+
+    it("should preserve queue across multiple reconnection attempts", async () => {
+      const transport = WebSocketTransport.make({
+        url: "ws://localhost:8080",
+        autoReconnect: true,
+        reconnectDelay: 100,
+      });
+
+      const connectPromise = transport.connect();
+      const ws = MockWebSocket.getLatest()!;
+      await ws.simulateOpenWithAuth();
+      await connectPromise;
+
+      // Simulate connection lost
+      ws.simulateClose(1006, "Connection lost");
+
+      // Queue message
+      const tx = Transaction.make([
+        {
+          kind: "string.set" as const,
+          path: OperationPath.make("title"),
+          payload: "important",
+        },
+      ]);
+      transport.send(tx);
+
+      // First reconnection attempt fails
+      vi.advanceTimersByTime(100);
+      MockWebSocket.getLatest()!.simulateClose(1006, "Failed again");
+
+      // Second reconnection attempt succeeds
+      vi.advanceTimersByTime(200);
+      const finalWs = MockWebSocket.getLatest()!;
+      await finalWs.simulateOpenWithAuth();
+
+      // Queued message should still be sent
+      expect(finalWs.sentMessages.length).toBe(2);
+      const sent = JSON.parse(finalWs.sentMessages[1]!);
+      expect(sent.type).toBe("submit");
+      expect(sent.transaction.id).toBe(tx.id);
+    });
+
+    it("should queue snapshot requests when disconnected", async () => {
+      const transport = WebSocketTransport.make({
+        url: "ws://localhost:8080",
+      });
+
+      // Queue snapshot request before connecting
+      transport.requestSnapshot();
+
+      // Connect
+      const connectPromise = transport.connect();
+      const ws = MockWebSocket.getLatest()!;
+      await ws.simulateOpenWithAuth();
+      await connectPromise;
+
+      // Should have sent: auth + request_snapshot
+      expect(ws.sentMessages.length).toBe(2);
+      const sent = JSON.parse(ws.sentMessages[1]!);
+      expect(sent.type).toBe("request_snapshot");
+    });
   });
 
   describe("requestSnapshot", () => {
@@ -811,16 +1001,51 @@ describe("WebSocketTransport", () => {
         expect(sent.data).toEqual({ cursor: { x: 50, y: 75 } });
       });
 
-      it("should not send when disconnected", async () => {
+      it("should queue presence_set when disconnected and send after connect", async () => {
         const transport = WebSocketTransport.make({
           url: "ws://localhost:8080",
         });
 
-        // Never connect - sendPresenceSet should be silently ignored
+        // Queue presence before connecting
         transport.sendPresenceSet({ x: 100, y: 200 });
 
-        // No WebSocket created, nothing sent
+        // No WebSocket created yet
         expect(MockWebSocket.instances.length).toBe(0);
+
+        // Now connect
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        // Should have sent: auth + presence_set
+        expect(ws.sentMessages.length).toBe(2);
+        const sent = JSON.parse(ws.sentMessages[1]!);
+        expect(sent.type).toBe("presence_set");
+        expect(sent.data).toEqual({ x: 100, y: 200 });
+      });
+
+      it("should only keep latest presence_set when multiple are queued", async () => {
+        const transport = WebSocketTransport.make({
+          url: "ws://localhost:8080",
+        });
+
+        // Queue multiple presence updates before connecting
+        transport.sendPresenceSet({ x: 100, y: 200 });
+        transport.sendPresenceSet({ x: 150, y: 250 });
+        transport.sendPresenceSet({ x: 200, y: 300 });
+
+        // Now connect
+        const connectPromise = transport.connect();
+        const ws = MockWebSocket.getLatest()!;
+        await ws.simulateOpenWithAuth();
+        await connectPromise;
+
+        // Should have sent: auth + only the latest presence_set
+        expect(ws.sentMessages.length).toBe(2);
+        const sent = JSON.parse(ws.sentMessages[1]!);
+        expect(sent.type).toBe("presence_set");
+        expect(sent.data).toEqual({ x: 200, y: 300 });
       });
     });
 
