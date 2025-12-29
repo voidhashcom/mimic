@@ -5,8 +5,31 @@
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import type { DurationInput } from "effect/Duration";
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { Primitive, Presence } from "@voidhash/mimic";
+
+// =============================================================================
+// Initial State Types
+// =============================================================================
+
+/**
+ * Context available when computing initial state for a document.
+ */
+export interface InitialContext {
+  /**
+   * The document ID being initialized.
+   */
+  readonly documentId: string;
+}
+
+/**
+ * Function that computes initial state for a document.
+ * Receives context with the document ID and returns an Effect that produces the initial state.
+ */
+export type InitialFn<TSchema extends Primitive.AnyPrimitive, R = never, E = never> = (
+  context: InitialContext
+) => Effect.Effect<Primitive.InferSetInput<TSchema>, E, R>;
 
 // =============================================================================
 // Mimic Server Configuration
@@ -18,7 +41,11 @@ import { Primitive, Presence } from "@voidhash/mimic";
  * Note: Authentication and persistence are now handled by injectable services
  * (MimicAuthService and MimicDataStorage) rather than config options.
  */
-export interface MimicServerConfig<TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive> {
+export interface MimicServerConfig<
+  TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive,
+  R = never,
+  E = never
+> {
   /**
    * The schema defining the document structure.
    */
@@ -56,17 +83,22 @@ export interface MimicServerConfig<TSchema extends Primitive.AnyPrimitive = Prim
   readonly presence: Presence.AnyPresence | undefined;
 
   /**
-   * Initial state for new documents.
-   * Used when a document is created and no existing state is found in storage.
-   * @default undefined (documents start empty)
+   * Initial state function for new documents.
+   * Called when a document is created and no existing state is found in storage.
+   * Receives the document ID and returns an Effect that produces the initial state.
+   * @default undefined (documents start empty or use schema defaults)
    */
-  readonly initial: Primitive.InferState<TSchema> | undefined;
+  readonly initial: InitialFn<TSchema, R, E> | undefined;
 }
 
 /**
  * Options for creating a MimicServerConfig.
  */
-export interface MimicServerConfigOptions<TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive> {
+export interface MimicServerConfigOptions<
+  TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive,
+  R = never,
+  E = never
+> {
   /**
    * The schema defining the document structure.
    */
@@ -105,32 +137,63 @@ export interface MimicServerConfigOptions<TSchema extends Primitive.AnyPrimitive
 
   /**
    * Initial state for new documents.
-   * Used when a document is created and no existing state is found in storage.
+   * Can be either:
+   * - A plain object with the initial state values
+   * - A function that receives context (with documentId) and returns an Effect producing the initial state
    *
    * Type-safe: required fields (without defaults) must be provided,
    * while optional fields and fields with defaults can be omitted.
    *
+   * @example
+   * // Plain object
+   * initial: { title: "New Document", count: 0 }
+   *
+   * @example
+   * // Function returning Effect
+   * initial: ({ documentId }) => Effect.succeed({ title: `Doc ${documentId}`, count: 0 })
+   *
    * @default undefined (documents start empty or use schema defaults)
    */
-  readonly initial?: Primitive.InferSetInput<TSchema>;
+  readonly initial?: Primitive.InferSetInput<TSchema> | InitialFn<TSchema, R, E>;
 }
+
+/**
+ * Check if a value is an InitialFn (function) rather than a plain object.
+ */
+const isInitialFn = <TSchema extends Primitive.AnyPrimitive, R, E>(
+  value: Primitive.InferSetInput<TSchema> | InitialFn<TSchema, R, E> | undefined
+): value is InitialFn<TSchema, R, E> => typeof value === "function";
 
 /**
  * Create a MimicServerConfig from options.
  */
-export const make = <TSchema extends Primitive.AnyPrimitive>(
-  options: MimicServerConfigOptions<TSchema>
-): MimicServerConfig<TSchema> => ({
-  schema: options.schema,
-  maxIdleTime: Duration.decode(options.maxIdleTime ?? "5 minutes"),
-  maxTransactionHistory: options.maxTransactionHistory ?? 1000,
-  heartbeatInterval: Duration.decode(options.heartbeatInterval ?? "30 seconds"),
-  heartbeatTimeout: Duration.decode(options.heartbeatTimeout ?? "10 seconds"),
-  presence: options.presence,
-  initial: options.initial !== undefined
-    ? Primitive.applyDefaults(options.schema, options.initial as Partial<Primitive.InferState<TSchema>>)
-    : undefined,
-});
+export const make = <TSchema extends Primitive.AnyPrimitive, R = never, E = never>(
+  options: MimicServerConfigOptions<TSchema, R, E>
+): MimicServerConfig<TSchema, R, E> => {
+  const { initial, schema } = options;
+
+  // Convert initial to a function that applies defaults
+  const initialFn: InitialFn<TSchema, R, E> | undefined = initial === undefined
+    ? undefined
+    : isInitialFn<TSchema, R, E>(initial)
+      ? (context) => Effect.map(
+          initial(context),
+          (state) => Primitive.applyDefaults(schema, state as Partial<Primitive.InferState<TSchema>>)
+        ) as Effect.Effect<Primitive.InferSetInput<TSchema>, E, R>
+      : () => Effect.succeed(
+          Primitive.applyDefaults(schema, initial as Partial<Primitive.InferState<TSchema>>)
+        ) as Effect.Effect<Primitive.InferSetInput<TSchema>, E, R>;
+
+  return {
+    schema,
+    maxIdleTime: Duration.decode(options.maxIdleTime ?? "5 minutes"),
+    maxTransactionHistory: options.maxTransactionHistory ?? 1000,
+    heartbeatInterval: Duration.decode(options.heartbeatInterval ?? "30 seconds"),
+    heartbeatTimeout: Duration.decode(options.heartbeatTimeout ?? "10 seconds"),
+    presence: options.presence,
+    initial: initialFn,
+  };
+};
 
 // =============================================================================
 // Context Tag

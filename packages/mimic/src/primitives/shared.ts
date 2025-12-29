@@ -39,9 +39,18 @@ export interface Primitive<TState, TProxy, TRequired extends boolean = false, TH
     /** Returns the initial/default state for this primitive */
     readonly getInitialState: () => TState | undefined;
     /**
+     * Converts a set input value to state format.
+     * For most primitives, this is a simple pass-through with defaults applied.
+     * For Tree primitives, this converts nested input to flat TreeState.
+     *
+     * @param input - The set input value
+     * @returns The corresponding state value
+     */
+    readonly convertSetInputToState?: (input: unknown) => TState;
+    /**
      * Transforms a client operation against a server operation.
      * Used for operational transformation (OT) conflict resolution.
-     * 
+     *
      * @param clientOp - The client's operation to transform
      * @param serverOp - The server's operation that has already been applied
      * @returns TransformResult indicating how the client operation should be handled

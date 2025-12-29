@@ -121,14 +121,127 @@ export type TreeNodeUpdateValue<TNode extends AnyTreeNodePrimitive> =
  * Uses StructSetInput directly so that:
  * - Fields that are required AND have no default must be provided
  * - Fields that are optional OR have defaults can be omitted
- * 
+ *
  * This bypasses the struct-level NeedsValue wrapper since tree inserts
  * always require a data object (even if empty for all-optional fields).
  */
-export type TreeNodeDataSetInput<TNode extends AnyTreeNodePrimitive> = 
+export type TreeNodeDataSetInput<TNode extends AnyTreeNodePrimitive> =
   TNode["data"] extends StructPrimitive<infer TFields, any, any>
     ? StructSetInput<TFields>
     : InferSetInput<TNode["data"]>;
+
+// =============================================================================
+// Nested Input Types for set() and default()
+// =============================================================================
+
+/**
+ * Type guard to check if a type is `any` or unknown (structural check).
+ * Returns true if T is `any`, false otherwise.
+ */
+type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+/**
+ * Get children types, with special handling for self-referential nodes.
+ * When InferTreeNodeChildren returns `any` (from TreeNodePrimitive<..., any>),
+ * we fall back to using TNode itself as its own child type.
+ * This handles the common case of self-referential nodes like:
+ *   FolderNode = TreeNode("folder", { children: [TreeNodeSelf, FileNode] })
+ * Where FolderNode's TChildren is resolved to FolderNode | FileNode,
+ * but the self-referenced FolderNode has TChildren = any.
+ */
+type ResolveChildrenForInput<TNode extends AnyTreeNodePrimitive, TOriginalNode extends AnyTreeNodePrimitive> =
+  IsAny<InferTreeNodeChildren<TNode>> extends true
+    ? TOriginalNode // Self-reference: use the original node's type
+    : InferTreeNodeChildren<TNode>;
+
+/**
+ * Helper type that creates a properly typed node input for a specific node type.
+ * This is the "strict" version that enforces exact property matching.
+ *
+ * The TOriginalNode parameter is used to track the original root node type
+ * for proper self-reference resolution in deeply nested structures.
+ */
+type TreeNodeSetInputStrictWithRoot<TNode extends AnyTreeNodePrimitive, TOriginalNode extends AnyTreeNodePrimitive> = {
+  readonly type: InferTreeNodeType<TNode>;
+  readonly id?: string;
+  readonly children: TreeNodeSetInputUnionWithRoot<ResolveChildrenForInput<TNode, TOriginalNode>, TOriginalNode>[];
+} & TreeNodeDataSetInput<TNode>;
+
+/**
+ * Distributive conditional type that creates a union of TreeNodeSetInputStrict
+ * for each node type in the union. This ensures proper type discrimination.
+ *
+ * When TNode is a union (e.g., FolderNode | FileNode), this distributes to:
+ * TreeNodeSetInputStrict<FolderNode> | TreeNodeSetInputStrict<FileNode>
+ *
+ * This creates a proper discriminated union where excess property checking works.
+ */
+type TreeNodeSetInputUnionWithRoot<TNode extends AnyTreeNodePrimitive, TOriginalNode extends AnyTreeNodePrimitive> =
+  TNode extends AnyTreeNodePrimitive ? TreeNodeSetInputStrictWithRoot<TNode, TOriginalNode> : never;
+
+/**
+ * Helper type for single-parameter usage - uses TNode as its own original.
+ */
+type TreeNodeSetInputStrict<TNode extends AnyTreeNodePrimitive> =
+  TreeNodeSetInputStrictWithRoot<TNode, TNode>;
+
+/**
+ * Distributive conditional for single-parameter usage.
+ */
+export type TreeNodeSetInputUnion<TNode extends AnyTreeNodePrimitive> =
+  TNode extends AnyTreeNodePrimitive ? TreeNodeSetInputStrict<TNode> : never;
+
+/**
+ * Input type for a single node in a nested tree set/default operation.
+ *
+ * - `type` is REQUIRED - explicit type discriminator for the node
+ * - `id` is optional - auto-generated if not provided
+ * - `children` is a typed array of allowed child node inputs
+ * - Data fields are spread at the node level (like TreeNodeSnapshot)
+ *
+ * When TNode is a union type (e.g., from InferTreeNodeChildren), this properly
+ * distributes to create a discriminated union where:
+ * - Each variant has its specific `type` literal
+ * - Each variant has its specific data fields
+ * - Excess property checking works correctly
+ *
+ * @example
+ * ```typescript
+ * const input: TreeNodeSetInput<BoardNode> = {
+ *   type: "board",
+ *   name: "My Board",
+ *   children: [
+ *     { type: "column", name: "Todo", children: [] }
+ *   ]
+ * };
+ * ```
+ */
+export type TreeNodeSetInput<TNode extends AnyTreeNodePrimitive> = TreeNodeSetInputUnion<TNode>;
+
+/**
+ * Input type for tree set() and default() operations.
+ * Accepts a nested tree structure that will be converted to flat TreeState internally.
+ */
+export type TreeSetInput<TRoot extends AnyTreeNodePrimitive> = TreeNodeSetInput<TRoot>;
+
+/**
+ * Infer the set input type for a tree primitive.
+ */
+export type InferTreeSetInput<T extends TreePrimitive<any>> =
+  T extends TreePrimitive<infer TRoot> ? TreeSetInput<TRoot> : never;
+
+/**
+ * Internal type for processing any node input during conversion.
+ * This is only used internally in _convertNestedToFlat and is not exported.
+ * Allows us to keep the public TreeNodeSetInput<TNode> fully type-safe while
+ * having a runtime-compatible type for internal processing.
+ */
+type InternalNodeInput = {
+  readonly type: string;
+  readonly id?: string;
+  readonly children: InternalNodeInput[];
+  readonly [key: string]: unknown;
+};
 
 /**
  * Typed proxy for a specific node type - provides type-safe data access
@@ -172,9 +285,9 @@ export interface TreeNodeProxyBase<_TRoot extends AnyTreeNodePrimitive> {
 export interface TreeProxy<TRoot extends AnyTreeNodePrimitive> {
   /** Gets the entire tree state (flat array of nodes) */
   get(): TreeState<TRoot>;
-  
-  /** Replaces the entire tree */
-  set(nodes: TreeState<TRoot>): void;
+
+  /** Replaces the entire tree with a nested input structure */
+  set(input: TreeSetInput<TRoot>): void;
   
   /** Gets the root node state */
   root(): TypedTreeNodeState<TRoot> | undefined;
@@ -258,16 +371,13 @@ export interface TreeProxy<TRoot extends AnyTreeNodePrimitive> {
 
 interface TreePrimitiveSchema<TRoot extends AnyTreeNodePrimitive> {
   readonly required: boolean;
-  readonly defaultValue: TreeState<TRoot> | undefined;
+  readonly defaultInput: TreeNodeSetInput<TRoot> | undefined;
   readonly root: TRoot;
   readonly validators: readonly Validator<TreeState<TRoot>>[];
 }
 
-/** Input type for tree set() - tree state */
-export type TreeSetInput<TRoot extends AnyTreeNodePrimitive> = TreeState<TRoot>;
-
-/** Input type for tree update() - same as set() for trees */
-export type TreeUpdateInput<TRoot extends AnyTreeNodePrimitive> = TreeState<TRoot>;
+/** Input type for tree update() - same as set() for trees (nested format) */
+export type TreeUpdateInput<TRoot extends AnyTreeNodePrimitive> = TreeNodeSetInput<TRoot>;
 
 export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends boolean = false, THasDefault extends boolean = false>
   implements Primitive<TreeState<TRoot>, TreeProxy<TRoot>, TRequired, THasDefault, TreeSetInput<TRoot>, TreeUpdateInput<TRoot>>
@@ -322,11 +432,11 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends
     });
   }
 
-  /** Set a default value for this tree */
-  default(defaultValue: TreeState<TRoot>): TreePrimitive<TRoot, TRequired, true> {
+  /** Set a default value for this tree (nested format) */
+  default(defaultInput: TreeNodeSetInput<TRoot>): TreePrimitive<TRoot, TRequired, true> {
     return new TreePrimitive({
       ...this._schema,
-      defaultValue,
+      defaultInput,
     });
   }
 
@@ -406,6 +516,78 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends
         `Allowed types: ${allowedTypes || "none"}`
       );
     }
+  }
+
+  /**
+   * Convert a nested TreeNodeSetInput to flat TreeState format.
+   * Recursively processes nodes, generating IDs and positions as needed.
+   *
+   * @param input - The root nested input to convert
+   * @param generateId - Optional ID generator (defaults to crypto.randomUUID)
+   * @returns Flat TreeState array
+   */
+  private _convertNestedToFlat(
+    input: TreeNodeSetInput<TRoot>,
+    generateId: () => string = () => crypto.randomUUID()
+  ): TreeState<TRoot> {
+    const result: TreeNodeState[] = [];
+    const seenIds = new Set<string>();
+
+    const processNode = (
+      nodeInput: InternalNodeInput,
+      parentId: string | null,
+      parentType: string | null,
+      leftPos: string | null,
+      rightPos: string | null
+    ): void => {
+      // Validate node type
+      this._validateChildType(parentType, nodeInput.type);
+
+      // Get the node primitive for this type
+      const nodePrimitive = this._getNodeTypePrimitive(nodeInput.type);
+
+      // Generate or use provided ID
+      const id = nodeInput.id ?? generateId();
+
+      // Check for duplicate IDs
+      if (seenIds.has(id)) {
+        throw new ValidationError(`Duplicate node ID: ${id}`);
+      }
+      seenIds.add(id);
+
+      // Generate position
+      const pos = generateTreePosBetween(leftPos, rightPos);
+
+      // Extract data fields (everything except type, id, and children)
+      const { type: _type, id: _id, children, ...dataFields } = nodeInput;
+
+      // Apply defaults to node data
+      const mergedData = applyDefaults(nodePrimitive.data as AnyPrimitive, dataFields);
+
+      // Add this node to result
+      result.push({
+        id,
+        type: nodeInput.type,
+        parentId,
+        pos,
+        data: mergedData,
+      });
+
+      // Process children recursively
+      let prevChildPos: string | null = null;
+      for (let i = 0; i < children.length; i++) {
+        const childInput = children[i]!;
+        // Each child gets a position after the previous child
+        processNode(childInput, id, nodeInput.type, prevChildPos, null);
+        // Update prevChildPos to the pos that was just assigned (it's the last item in result)
+        prevChildPos = result[result.length - 1]!.pos;
+      }
+    };
+
+    // Process root node (cast to InternalNodeInput for internal processing)
+    processNode(input as unknown as InternalNodeInput, null, null, null, null);
+
+    return result as TreeState<TRoot>;
   }
 
   readonly _internal: PrimitiveInternal<TreeState<TRoot>, TreeProxy<TRoot>> = {
@@ -496,9 +678,11 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends
           return getCurrentState();
         },
 
-        set: (nodes: TreeState<TRoot>) => {
+        set: (input: TreeSetInput<TRoot>) => {
+          // Convert nested input to flat TreeState using env.generateId for IDs
+          const flatState = this._convertNestedToFlat(input, env.generateId);
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, nodes)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set, flatState)
           );
         },
 
@@ -1074,8 +1258,9 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends
     },
 
     getInitialState: (): TreeState<TRoot> | undefined => {
-      if (this._schema.defaultValue !== undefined) {
-        return this._schema.defaultValue;
+      if (this._schema.defaultInput !== undefined) {
+        // Convert nested input to flat TreeState
+        return this._convertNestedToFlat(this._schema.defaultInput);
       }
 
       // Automatically create a root node with default data
@@ -1091,6 +1276,11 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends
         pos: rootPos,
         data: rootData,
       }] as TreeState<TRoot>;
+    },
+
+    convertSetInputToState: (input: unknown): TreeState<TRoot> => {
+      // Convert nested input format to flat TreeState
+      return this._convertNestedToFlat(input as TreeNodeSetInput<TRoot>);
     },
 
     transformOperation: (
@@ -1201,7 +1391,7 @@ export const Tree = <TRoot extends AnyTreeNodePrimitive>(
 ): TreePrimitive<TRoot, false, false> =>
   new TreePrimitive({
     required: false,
-    defaultValue: undefined,
+    defaultInput: undefined,
     root: options.root,
     validators: [],
   });

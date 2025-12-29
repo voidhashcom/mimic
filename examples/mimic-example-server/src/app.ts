@@ -19,6 +19,27 @@ const MimicRoute = MimicServer.layerHttpLayerRouter({
   schema: MimicExampleSchema,
   authLayer: CustomAuthLayer,
   presence: PresenceSchema,
+  initial: {
+    type: "board",
+    name: "My Board",
+    children: [
+      {
+        type: "column",
+        name: "Todo",
+        children: [],
+      },
+      {
+        type: "column",
+        name: "In Progress",
+        children: [],
+      },
+      {
+        type: "column",
+        name: "Done",
+        children: [],
+      }
+    ],
+  }
 });
 
 const AllRoutes = Layer.mergeAll(
