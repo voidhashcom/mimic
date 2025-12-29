@@ -41,7 +41,7 @@ const createTransactionFromDoc = <TSchema extends Primitive.AnyPrimitive>(
   initialState: Primitive.InferState<TSchema> | undefined,
   fn: (root: Primitive.InferProxy<TSchema>) => void
 ): Transaction.Transaction => {
-  const doc = Document.make(schema, { initial: initialState });
+  const doc = Document.make(schema, { initialState: initialState });
   doc.transaction(fn);
   return doc.flush();
 };

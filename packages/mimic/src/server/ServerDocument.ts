@@ -177,8 +177,9 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     }
 
     // Create a temporary document with current state to test the operations
+    // Use initialState (not initial) since currentState is already in flat state format
     const currentState = _document.get();
-    const tempDoc = Document.make(schema, { initial: currentState });
+    const tempDoc = Document.make(schema, { initialState: currentState });
 
     try {
       // Attempt to apply all operations
