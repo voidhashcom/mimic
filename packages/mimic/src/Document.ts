@@ -80,8 +80,8 @@ export interface Document<TSchema extends Primitive.AnyPrimitive> {
 // =============================================================================
 
 export interface DocumentOptions<TSchema extends Primitive.AnyPrimitive> {
-  /** Initial state for the document */
-  readonly initial?: Primitive.InferState<TSchema>;
+  /** Initial value for the document (using set input format) */
+  readonly initial?: Primitive.InferSetInput<TSchema>;
 }
 
 // =============================================================================
@@ -95,9 +95,13 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   schema: TSchema,
   options?: DocumentOptions<TSchema>
 ): Document<TSchema> => {
-  // Internal state
-  let _state: Primitive.InferState<TSchema> | undefined = 
-    options?.initial ?? schema._internal.getInitialState();
+  // Internal state - convert initial input to state format if provided
+  let _state: Primitive.InferState<TSchema> | undefined =
+    options?.initial !== undefined
+      ? (schema._internal.convertSetInputToState
+          ? schema._internal.convertSetInputToState(options.initial)
+          : options.initial as Primitive.InferState<TSchema>)
+      : schema._internal.getInitialState();
   
   // Pending operations buffer (local changes not yet flushed)
   let _pending: Operation.Operation<any, any, any>[] = [];

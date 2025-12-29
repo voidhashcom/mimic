@@ -1278,6 +1278,11 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends
       }] as TreeState<TRoot>;
     },
 
+    convertSetInputToState: (input: unknown): TreeState<TRoot> => {
+      // Convert nested input format to flat TreeState
+      return this._convertNestedToFlat(input as TreeNodeSetInput<TRoot>);
+    },
+
     transformOperation: (
       clientOp: Operation.Operation<any, any, any>,
       serverOp: Operation.Operation<any, any, any>

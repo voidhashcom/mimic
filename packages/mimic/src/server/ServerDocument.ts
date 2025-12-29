@@ -60,8 +60,8 @@ export type SubmitResult =
 export interface ServerDocumentOptions<TSchema extends Primitive.AnyPrimitive> {
   /** The schema defining the document structure */
   readonly schema: TSchema;
-  /** Initial state (optional, will use schema defaults if not provided) */
-  readonly initialState?: Primitive.InferState<TSchema>;
+  /** Initial value (optional, will use schema defaults if not provided) - uses set input format */
+  readonly initialState?: Primitive.InferSetInput<TSchema>;
   /** Initial version number (optional, defaults to 0) */
   readonly initialVersion?: number;
   /** Called when a transaction is successfully applied and should be broadcast */

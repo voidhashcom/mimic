@@ -126,7 +126,7 @@ const makeDocumentManager = Effect.gen(function* () {
       // Create ServerDocument with broadcast callback
       const serverDocument = ServerDocument.make({
         schema: config.schema,
-        initialState: initialState as Primitive.InferState<typeof config.schema> | undefined,
+        initialState: initialState as Primitive.InferSetInput<typeof config.schema> | undefined,
         maxTransactionHistory: config.maxTransactionHistory,
         onBroadcast: (transactionMessage) => {
           // Get current state and save to storage
