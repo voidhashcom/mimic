@@ -458,11 +458,10 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
 
       if (_state.type === "connected") {
         sendRaw(message);
-      } else if (_state.type === "reconnecting") {
-        // Queue message for when we reconnect
+      } else {
+        // Queue message for when we reconnect (works for both reconnecting and disconnected states)
         _messageQueue.push(message);
       }
-      // If disconnected, silently drop (caller should check isConnected)
     },
 
     requestSnapshot: (): void => {
@@ -470,7 +469,8 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
 
       if (_state.type === "connected") {
         sendRaw(message);
-      } else if (_state.type === "reconnecting") {
+      } else {
+        // Queue for later
         _messageQueue.push(message);
       }
     },
@@ -546,9 +546,9 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
 
       if (_state.type === "connected") {
         sendRaw(message);
-      } else if (_state.type === "reconnecting") {
-        // Remove all set messages from the message queue
-        _messageQueue = _messageQueue.filter((message) => message.type !== "presence_set");
+      } else {
+        // Remove all set messages from the message queue (only keep latest)
+        _messageQueue = _messageQueue.filter((m) => m.type !== "presence_set");
         // Add the new presence set message to the queue
         _messageQueue.push(message);
       }
@@ -559,9 +559,9 @@ export const make = (options: WebSocketTransportOptions): Transport.Transport =>
 
       if (_state.type === "connected") {
         sendRaw(message);
-      } else if (_state.type === "reconnecting") {
+      } else {
         // Remove all clear messages from the message queue
-        _messageQueue = _messageQueue.filter((message) => message.type !== "presence_clear");
+        _messageQueue = _messageQueue.filter((m) => m.type !== "presence_clear");
         // Add the new presence clear message to the queue
         _messageQueue.push(message);
       }
