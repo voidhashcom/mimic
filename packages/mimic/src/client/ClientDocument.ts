@@ -467,8 +467,8 @@ export const make = <
       serverState: _serverState,
     });
 
-    // Create fresh document from server state
-    _optimisticDoc = Document.make(schema, { initial: _serverState });
+    // Create fresh document from server state (use initialState for raw state format)
+    _optimisticDoc = Document.make(schema, { initialState: _serverState });
 
     // Apply all pending transactions
     for (const pending of _pending) {
