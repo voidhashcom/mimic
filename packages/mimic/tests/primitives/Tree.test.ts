@@ -294,15 +294,20 @@ describe("TreePrimitive", () => {
       const { env } = createEnvWithState(initialState);
       const proxy = fileSystemTree._internal.createProxy(env, OperationPath.make(""));
 
+
       const snapshot = proxy.toSnapshot();
       expect(snapshot).toBeDefined();
       expect(snapshot!.id).toBe("root");
       expect(snapshot!.type).toBe("folder");
+      expect(snapshot!.parentId).toBe(null);
+      expect(snapshot!.pos).toBe("a0");
       expect(snapshot!.name).toBe("Root"); // Data spread at node level
       expect(snapshot!.children).toHaveLength(2);
 
       const file1Snapshot = snapshot!.children[0]!;
       expect(file1Snapshot.id).toBe("file1");
+      expect(file1Snapshot.parentId).toBe("root");
+      expect(file1Snapshot.pos).toBe("a0");
       expect(file1Snapshot.name).toBe("File1");
       expect(file1Snapshot.children).toEqual([]);
 

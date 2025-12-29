@@ -96,6 +96,8 @@ const generateTreePosBetween = (left: string | null, right: string | null): stri
  */
 export type TreeNodeSnapshot<TNode extends AnyTreeNodePrimitive> = {
   readonly id: string;
+  readonly pos: string;
+  readonly parentId: string | null;
   readonly type: InferTreeNodeType<TNode>;
   readonly children: TreeNodeSnapshot<InferTreeNodeChildren<TNode>>[];
 } & InferTreeNodeDataState<TNode>;
@@ -668,6 +670,8 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends
         return {
           id: node.id,
           type: node.type,
+          pos: node.pos,
+          parentId: node.parentId,
           ...(node.data as object),
           children,
         } as unknown as TreeNodeSnapshot<TRoot>;
