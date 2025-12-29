@@ -27,7 +27,9 @@ import { PathInput } from "@effect/platform/HttpRouter";
 /**
  * Options for creating a Mimic server layer.
  */
-export interface MimicLayerOptions<TSchema extends Primitive.AnyPrimitive> {
+export interface MimicLayerOptions<
+  TSchema extends Primitive.AnyPrimitive,
+> {
   /**
    * Base path for document routes (used for path matching).
    * @example "/mimic/todo" - documents accessed at "/mimic/todo/:documentId"
@@ -49,14 +51,19 @@ export interface MimicLayerOptions<TSchema extends Primitive.AnyPrimitive> {
   readonly presence?: Presence.AnyPresence;
   /**
    * Initial state for new documents.
-   * Used when a document is created and no existing state is found in storage.
+   * Can be either:
+   * - A plain object with the initial state values
+   * - A function that receives context (with documentId) and returns an Effect producing the initial state
+   *
+   * When using a function that requires Effect services (has R requirements),
+   * you must also provide `initialLayer` to supply those dependencies.
    *
    * Type-safe: required fields (without defaults) must be provided,
    * while optional fields and fields with defaults can be omitted.
    *
    * @default undefined (documents start empty or use schema defaults)
    */
-  readonly initial?: Primitive.InferSetInput<TSchema>;
+  readonly initial?: Primitive.InferSetInput<TSchema> | MimicConfig.InitialFn<TSchema>;
 }
 
 
@@ -125,6 +132,17 @@ const makeMimicHandler = Effect.gen(function* () {
 
 
 /**
+ * Options for layerHttpLayerRouter including optional custom layers.
+ */
+export interface MimicLayerRouterOptions<TSchema extends Primitive.AnyPrimitive>
+  extends MimicLayerOptions<TSchema> {
+  /** Custom auth layer. Defaults to NoAuth (all connections allowed). */
+  readonly authLayer?: Layer.Layer<MimicAuthServiceTag>;
+  /** Custom storage layer. Defaults to InMemoryDataStorage. */
+  readonly storageLayer?: Layer.Layer<MimicDataStorageTag>;
+}
+
+/**
  * Create a Mimic server layer that integrates with HttpLayerRouter.
  *
  * This function creates a layer that:
@@ -170,44 +188,52 @@ const makeMimicHandler = Effect.gen(function* () {
  * );
  * ```
  */
-export const layerHttpLayerRouter = <TSchema extends Primitive.AnyPrimitive>(
-  options: MimicLayerOptions<TSchema> & {
-    /** Custom auth layer. Defaults to NoAuth (all connections allowed). */
-    readonly authLayer?: Layer.Layer<MimicAuthServiceTag>;
-    /** Custom storage layer. Defaults to InMemoryDataStorage. */
-    readonly storageLayer?: Layer.Layer<MimicDataStorageTag>;
-  }
-) => {
-  // Build the base path pattern for WebSocket routes
-  // Append /doc/* to match /basePath/doc/{documentId}
-  const basePath = options.basePath ?? "/mimic";
-  const wsPath: PathInput = `${basePath}/doc/*` as PathInput;
+export const layerHttpLayerRouter = <
+  TSchema extends Primitive.AnyPrimitive,
+  TError,
+  TRequirements
+>(
+  optionsEf: Effect.Effect<MimicLayerRouterOptions<TSchema>, TError, TRequirements>
+): Layer.Layer<never, TError, TRequirements | HttpLayerRouter.HttpRouter> => {
+  return Layer.unwrapScoped(
+    Effect.gen(function* () {
+      const options = yield* optionsEf;
 
-  // Create the config layer
-  const configLayer = MimicConfig.layer({
-    schema: options.schema,
-    maxTransactionHistory: options.maxTransactionHistory,
-    presence: options.presence,
-    initial: options.initial,
-  });
+      // Build the base path pattern for WebSocket routes
+      // Append /doc/* to match /basePath/doc/{documentId}
+      const basePath = options.basePath ?? "/mimic";
+      const wsPath: PathInput = `${basePath}/doc/*` as PathInput;
 
-  // Use provided layers or defaults
-  const authLayer = options.authLayer ?? NoAuth.layerDefault;
-  const storageLayer = options.storageLayer ?? InMemoryDataStorage.layerDefault;
+      // Create the config layer with properly typed initial function
+      const configLayer = MimicConfig.layer<TSchema>({
+        schema: options.schema,
+        maxTransactionHistory: options.maxTransactionHistory,
+        presence: options.presence,
+        initial: options.initial,
+      });
 
-  // Create the route registration effect
-  const registerRoute = Effect.gen(function* () {
-    const router = yield* HttpLayerRouter.HttpRouter;
-    const handler = yield* makeMimicHandler;
-    yield* router.add("GET", wsPath, handler);
-  });
+      // Use provided layers or defaults
+      const authLayer = options.authLayer ?? NoAuth.layerDefault;
+      const storageLayer = options.storageLayer ?? InMemoryDataStorage.layerDefault;
 
-  // Build the layer with all dependencies
-  return Layer.scopedDiscard(registerRoute).pipe(
-    Layer.provide(DocumentManager.layer),
-    Layer.provide(PresenceManager.layer),
-    Layer.provide(configLayer),
-    Layer.provide(storageLayer),
-    Layer.provide(authLayer)
+      // Combine all dependency layers
+      const depsLayer = Layer.mergeAll(configLayer, authLayer, storageLayer);
+
+      // Create the route registration layer
+      const routeLayer = Layer.scopedDiscard(
+        Effect.gen(function* () {
+          const router = yield* HttpLayerRouter.HttpRouter;
+          const handler = yield* makeMimicHandler;
+          yield* router.add("GET", wsPath, handler);
+        })
+      );
+
+      // Build the complete layer with all dependencies provided
+      return routeLayer.pipe(
+        Layer.provide(DocumentManager.layer),
+        Layer.provide(PresenceManager.layer),
+        Layer.provide(depsLayer),
+      );
+    })
   );
 };

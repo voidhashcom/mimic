@@ -27,9 +27,9 @@ export interface InitialContext {
  * Function that computes initial state for a document.
  * Receives context with the document ID and returns an Effect that produces the initial state.
  */
-export type InitialFn<TSchema extends Primitive.AnyPrimitive, R = never, E = never> = (
+export type InitialFn<TSchema extends Primitive.AnyPrimitive> = (
   context: InitialContext
-) => Effect.Effect<Primitive.InferSetInput<TSchema>, E, R>;
+) => Effect.Effect<Primitive.InferSetInput<TSchema>>;
 
 // =============================================================================
 // Mimic Server Configuration
@@ -43,8 +43,6 @@ export type InitialFn<TSchema extends Primitive.AnyPrimitive, R = never, E = nev
  */
 export interface MimicServerConfig<
   TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive,
-  R = never,
-  E = never
 > {
   /**
    * The schema defining the document structure.
@@ -88,7 +86,7 @@ export interface MimicServerConfig<
    * Receives the document ID and returns an Effect that produces the initial state.
    * @default undefined (documents start empty or use schema defaults)
    */
-  readonly initial: InitialFn<TSchema, R, E> | undefined;
+  readonly initial: InitialFn<TSchema> | undefined;
 }
 
 /**
@@ -96,8 +94,6 @@ export interface MimicServerConfig<
  */
 export interface MimicServerConfigOptions<
   TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive,
-  R = never,
-  E = never
 > {
   /**
    * The schema defining the document structure.
@@ -154,35 +150,35 @@ export interface MimicServerConfigOptions<
    *
    * @default undefined (documents start empty or use schema defaults)
    */
-  readonly initial?: Primitive.InferSetInput<TSchema> | InitialFn<TSchema, R, E>;
+  readonly initial?: Primitive.InferSetInput<TSchema> | InitialFn<TSchema>;
 }
 
 /**
  * Check if a value is an InitialFn (function) rather than a plain object.
  */
-const isInitialFn = <TSchema extends Primitive.AnyPrimitive, R, E>(
-  value: Primitive.InferSetInput<TSchema> | InitialFn<TSchema, R, E> | undefined
-): value is InitialFn<TSchema, R, E> => typeof value === "function";
+const isInitialFn = <TSchema extends Primitive.AnyPrimitive>(
+  value: Primitive.InferSetInput<TSchema> | InitialFn<TSchema> | undefined
+): value is InitialFn<TSchema> => typeof value === "function";
 
 /**
  * Create a MimicServerConfig from options.
  */
-export const make = <TSchema extends Primitive.AnyPrimitive, R = never, E = never>(
-  options: MimicServerConfigOptions<TSchema, R, E>
-): MimicServerConfig<TSchema, R, E> => {
+export const make = <TSchema extends Primitive.AnyPrimitive>(
+  options: MimicServerConfigOptions<TSchema>
+): MimicServerConfig<TSchema> => {
   const { initial, schema } = options;
 
   // Convert initial to a function that applies defaults
-  const initialFn: InitialFn<TSchema, R, E> | undefined = initial === undefined
+  const initialFn: InitialFn<TSchema> | undefined = initial === undefined
     ? undefined
-    : isInitialFn<TSchema, R, E>(initial)
+    : isInitialFn<TSchema>(initial)
       ? (context) => Effect.map(
           initial(context),
           (state) => Primitive.applyDefaults(schema, state as Partial<Primitive.InferState<TSchema>>)
-        ) as Effect.Effect<Primitive.InferSetInput<TSchema>, E, R>
+        ) as Effect.Effect<Primitive.InferSetInput<TSchema>>
       : () => Effect.succeed(
           Primitive.applyDefaults(schema, initial as Partial<Primitive.InferState<TSchema>>)
-        ) as Effect.Effect<Primitive.InferSetInput<TSchema>, E, R>;
+        ) as Effect.Effect<Primitive.InferSetInput<TSchema>>;
 
   return {
     schema,
@@ -212,4 +208,4 @@ export class MimicServerConfigTag extends Context.Tag(
 export const layer = <TSchema extends Primitive.AnyPrimitive>(
   options: MimicServerConfigOptions<TSchema>
 ): Layer.Layer<MimicServerConfigTag> =>
-  Layer.succeed(MimicServerConfigTag, make(options));
+  Layer.succeed(MimicServerConfigTag, make(options) as unknown as MimicServerConfig);
