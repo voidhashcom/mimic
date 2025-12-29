@@ -265,8 +265,8 @@ export const make = <
   let _serverTransactionHistory: Transaction.Transaction[] = [];
   const MAX_HISTORY_SIZE = 100;
 
-  // The underlying document for optimistic state
-  let _optimisticDoc = Document.make(schema, { initial: _serverState });
+  // The underlying document for optimistic state (use initialState for raw state format)
+  let _optimisticDoc = Document.make(schema, { initialState: _serverState });
 
   // Subscription cleanup
   let _unsubscribe: (() => void) | null = null;
@@ -586,7 +586,7 @@ export const make = <
       _pending.splice(pendingIndex, 1);
 
       // Apply to server state
-      const tempDoc = Document.make(schema, { initial: _serverState });
+      const tempDoc = Document.make(schema, { initialState: _serverState });
       tempDoc.apply(serverTx.ops);
       _serverState = tempDoc.get();
 
@@ -606,7 +606,7 @@ export const make = <
       });
 
       // Apply to server state
-      const tempDoc = Document.make(schema, { initial: _serverState });
+      const tempDoc = Document.make(schema, { initialState: _serverState });
       tempDoc.apply(serverTx.ops);
       _serverState = tempDoc.get();
 
