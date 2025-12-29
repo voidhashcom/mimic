@@ -82,6 +82,12 @@ export interface Document<TSchema extends Primitive.AnyPrimitive> {
 export interface DocumentOptions<TSchema extends Primitive.AnyPrimitive> {
   /** Initial value for the document (using set input format) */
   readonly initial?: Primitive.InferSetInput<TSchema>;
+  /**
+   * Raw initial state for the document (already in internal state format).
+   * Use this when loading state from the server or storage.
+   * Takes precedence over `initial` if both are provided.
+   */
+  readonly initialState?: Primitive.InferState<TSchema>;
 }
 
 // =============================================================================
@@ -95,13 +101,16 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   schema: TSchema,
   options?: DocumentOptions<TSchema>
 ): Document<TSchema> => {
-  // Internal state - convert initial input to state format if provided
+  // Internal state - determine initial state based on options
+  // Priority: initialState (raw) > initial (needs conversion) > schema defaults
   let _state: Primitive.InferState<TSchema> | undefined =
-    options?.initial !== undefined
-      ? (schema._internal.convertSetInputToState
-          ? schema._internal.convertSetInputToState(options.initial)
-          : options.initial as Primitive.InferState<TSchema>)
-      : schema._internal.getInitialState();
+    options?.initialState !== undefined
+      ? options.initialState
+      : options?.initial !== undefined
+        ? (schema._internal.convertSetInputToState
+            ? schema._internal.convertSetInputToState(options.initial)
+            : options.initial as Primitive.InferState<TSchema>)
+        : schema._internal.getInitialState();
   
   // Pending operations buffer (local changes not yet flushed)
   let _pending: Operation.Operation<any, any, any>[] = [];
