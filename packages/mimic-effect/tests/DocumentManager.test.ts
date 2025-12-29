@@ -352,6 +352,21 @@ describe("DocumentManager", () => {
       );
     };
 
+    const makeTestLayerWithInitialFn = (
+      initialFn: (ctx: { documentId: string }) => Effect.Effect<{ title?: string; count?: number }>
+    ) => {
+      const configLayer = MimicConfig.layer({
+        schema: TestSchema,
+        maxTransactionHistory: 100,
+        initial: initialFn,
+      });
+
+      return DocumentManager.layer.pipe(
+        Layer.provide(configLayer),
+        Layer.provide(InMemoryDataStorage.layer)
+      );
+    };
+
     it("should use initial state for new documents", async () => {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
@@ -396,6 +411,54 @@ describe("DocumentManager", () => {
       expect((result.state as any).title).toBe("Modified Title");
       // count should still be 42 since we only modified title
       expect((result.state as any).count).toBe(42);
+    });
+
+    it("should use initial state function with documentId for new documents", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const manager = yield* DocumentManager.DocumentManagerTag;
+          return yield* manager.getSnapshot("my-special-doc");
+        }).pipe(Effect.provide(makeTestLayerWithInitialFn(
+          ({ documentId }) => Effect.succeed({ title: `Doc: ${documentId}`, count: documentId.length })
+        )))
+      );
+
+      expect(result.type).toBe("snapshot");
+      expect(result.version).toBe(0);
+      expect(result.state).toEqual({ title: "Doc: my-special-doc", count: 14 });
+    });
+
+    it("should call initial function with different documentIds", async () => {
+      const layer = makeTestLayerWithInitialFn(
+        ({ documentId }) => Effect.succeed({ title: documentId, count: documentId.length })
+      );
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const manager = yield* DocumentManager.DocumentManagerTag;
+          const snap1 = yield* manager.getSnapshot("short");
+          const snap2 = yield* manager.getSnapshot("longer-document-id");
+          return { snap1, snap2 };
+        }).pipe(Effect.provide(layer))
+      );
+
+      expect(result.snap1.state).toEqual({ title: "short", count: 5 });
+      expect(result.snap2.state).toEqual({ title: "longer-document-id", count: 18 });
+    });
+
+    it("should apply defaults to initial function result", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const manager = yield* DocumentManager.DocumentManagerTag;
+          return yield* manager.getSnapshot("test-doc");
+        }).pipe(Effect.provide(makeTestLayerWithInitialFn(
+          ({ documentId }) => Effect.succeed({ title: documentId }) // count omitted
+        )))
+      );
+
+      expect(result.type).toBe("snapshot");
+      // count should be 0 (default)
+      expect(result.state).toEqual({ title: "test-doc", count: 0 });
     });
   });
 });

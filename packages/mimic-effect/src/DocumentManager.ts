@@ -113,10 +113,12 @@ const makeDocumentManager = Effect.gen(function* () {
         () => Effect.succeed(undefined)
       );
 
-      // Transform loaded state with onLoad hook, or use configured initial state for new docs
+      // Transform loaded state with onLoad hook, or compute initial state for new docs
       const initialState = rawState !== undefined
         ? yield* storage.onLoad(rawState)
-        : config.initial;
+        : config.initial !== undefined
+          ? yield* config.initial({ documentId })
+          : undefined;
 
       // Create PubSub for broadcasting
       const pubsub = yield* PubSub.unbounded<Protocol.ServerBroadcast>();

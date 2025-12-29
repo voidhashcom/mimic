@@ -182,25 +182,50 @@ describe("MimicConfig", () => {
       expect(config.initial).toBeUndefined();
     });
 
-    it("should accept initial state option", () => {
+    it("should accept initial state object and convert to function", async () => {
       const config = MimicConfig.make({
         schema: TestSchema,
         initial: { title: "My Document", count: 42 },
       });
 
-      expect(config.initial).toEqual({ title: "My Document", count: 42 });
+      expect(typeof config.initial).toBe("function");
+      // The function should return the initial state when called
+      const result = await Effect.runPromise(config.initial!({ documentId: "test-doc" }));
+      expect(result).toEqual({ title: "My Document", count: 42 });
     });
 
-    it("should apply defaults for omitted fields in initial state", () => {
+    it("should apply defaults for omitted fields in initial state object", async () => {
       const config = MimicConfig.make({
         schema: TestSchema,
         initial: { title: "My Document" }, // count has default of 0
       });
 
-      expect(config.initial).toEqual({ title: "My Document", count: 0 });
+      const result = await Effect.runPromise(config.initial!({ documentId: "test-doc" }));
+      expect(result).toEqual({ title: "My Document", count: 0 });
     });
 
-    it("should provide initial state through layer", async () => {
+    it("should accept initial state function", async () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+        initial: ({ documentId }) => Effect.succeed({ title: `Doc ${documentId}`, count: 123 }),
+      });
+
+      expect(typeof config.initial).toBe("function");
+      const result = await Effect.runPromise(config.initial!({ documentId: "my-doc-id" }));
+      expect(result).toEqual({ title: "Doc my-doc-id", count: 123 });
+    });
+
+    it("should apply defaults to initial state function result", async () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+        initial: ({ documentId }) => Effect.succeed({ title: documentId }), // count omitted
+      });
+
+      const result = await Effect.runPromise(config.initial!({ documentId: "test" }));
+      expect(result).toEqual({ title: "test", count: 0 });
+    });
+
+    it("should provide initial function through layer", async () => {
       const testLayer = MimicConfig.layer({
         schema: TestSchema,
         initial: { title: "From Layer", count: 100 },
@@ -209,14 +234,14 @@ describe("MimicConfig", () => {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           const config = yield* MimicConfig.MimicServerConfigTag;
-          return config.initial;
+          return yield* config.initial!({ documentId: "layer-doc" });
         }).pipe(Effect.provide(testLayer))
       );
 
       expect(result).toEqual({ title: "From Layer", count: 100 });
     });
 
-    it("should work with schema that has required fields without defaults", () => {
+    it("should work with schema that has required fields without defaults", async () => {
       const SchemaWithRequired = Primitive.Struct({
         name: Primitive.String().required(),
         optional: Primitive.String().default("default"),
@@ -227,10 +252,11 @@ describe("MimicConfig", () => {
         initial: { name: "Required Name" },
       });
 
-      expect(config.initial).toEqual({ name: "Required Name", optional: "default" });
+      const result = await Effect.runPromise(config.initial!({ documentId: "test" }));
+      expect(result).toEqual({ name: "Required Name", optional: "default" });
     });
 
-    it("should work with all options including initial", () => {
+    it("should work with all options including initial object", async () => {
       const config = MimicConfig.make({
         schema: TestSchema,
         maxIdleTime: "10 minutes",
@@ -241,7 +267,24 @@ describe("MimicConfig", () => {
       expect(config.schema).toBe(TestSchema);
       expect(Duration.toMillis(config.maxIdleTime)).toBe(10 * 60 * 1000);
       expect(config.maxTransactionHistory).toBe(500);
-      expect(config.initial).toEqual({ title: "Full Options", count: 999 });
+      const result = await Effect.runPromise(config.initial!({ documentId: "test" }));
+      expect(result).toEqual({ title: "Full Options", count: 999 });
+    });
+
+    it("should work with initial function that uses documentId", async () => {
+      const config = MimicConfig.make({
+        schema: TestSchema,
+        initial: ({ documentId }) => Effect.succeed({
+          title: `Document: ${documentId}`,
+          count: documentId.length,
+        }),
+      });
+
+      const result1 = await Effect.runPromise(config.initial!({ documentId: "short" }));
+      expect(result1).toEqual({ title: "Document: short", count: 5 });
+
+      const result2 = await Effect.runPromise(config.initial!({ documentId: "longer-id" }));
+      expect(result2).toEqual({ title: "Document: longer-id", count: 9 });
     });
   });
 });
