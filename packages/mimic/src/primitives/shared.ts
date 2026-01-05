@@ -187,12 +187,12 @@ export function isCompatibleOperation(operation: Operation.Operation<any, any, a
 // =============================================================================
 
 /**
- * Applies default values to a partial input, recursively handling nested structs.
+ * Applies default values to a partial input, recursively handling nested structs and unions.
  * 
  * Uses a two-layer approach:
  * 1. First, get the struct's initial state (which includes struct-level defaults)
  * 2. Then, layer the provided values on top
- * 3. Finally, ensure nested structs are recursively processed
+ * 3. Finally, ensure nested structs and unions are recursively processed
  * 
  * @param primitive - The primitive definition containing field information
  * @param value - The partial value provided by the user
@@ -202,7 +202,7 @@ export function applyDefaults<T extends AnyPrimitive>(
   primitive: T,
   value: Partial<InferState<T>>
 ): InferState<T> {
-  // Only structs need default merging
+  // Handle StructPrimitive
   if (primitive._tag === "StructPrimitive") {
     const structPrimitive = primitive as unknown as { 
       fields: Record<string, AnyPrimitive>;
@@ -224,16 +224,65 @@ export function applyDefaults<T extends AnyPrimitive>(
         if (fieldDefault !== undefined) {
           result[key] = fieldDefault;
         }
-      } else if (fieldPrimitive._tag === "StructPrimitive" && typeof result[key] === "object" && result[key] !== null) {
-        // Recursively apply defaults to nested structs
-        result[key] = applyDefaults(fieldPrimitive, result[key] as Partial<InferState<typeof fieldPrimitive>>);
+      } else if (typeof result[key] === "object" && result[key] !== null) {
+        // Recursively apply defaults to nested structs and unions
+        if (fieldPrimitive._tag === "StructPrimitive" || fieldPrimitive._tag === "UnionPrimitive") {
+          result[key] = applyDefaults(fieldPrimitive, result[key] as Partial<InferState<typeof fieldPrimitive>>);
+        }
       }
     }
     
     return result as InferState<T>;
   }
   
-  // For non-struct primitives, return the value as-is
+  // Handle UnionPrimitive
+  if (primitive._tag === "UnionPrimitive") {
+    const unionPrimitive = primitive as unknown as {
+      _schema: {
+        discriminator: string;
+        variants: Record<string, AnyPrimitive>;
+      };
+    };
+    
+    // Validate that value is an object
+    if (typeof value !== "object" || value === null) {
+      return value as InferState<T>;
+    }
+    
+    const discriminator = unionPrimitive._schema.discriminator;
+    const discriminatorValue = (value as Record<string, unknown>)[discriminator];
+    
+    // Find the matching variant based on discriminator value
+    let matchingVariantKey: string | undefined;
+    for (const variantKey in unionPrimitive._schema.variants) {
+      const variant = unionPrimitive._schema.variants[variantKey]!;
+      // Variants are structs - check if the discriminator field's literal matches
+      if (variant._tag === "StructPrimitive") {
+        const variantStruct = variant as unknown as {
+          fields: Record<string, AnyPrimitive>;
+        };
+        const discriminatorField = variantStruct.fields[discriminator];
+        if (discriminatorField && discriminatorField._tag === "LiteralPrimitive") {
+          const literalPrimitive = discriminatorField as unknown as { literal: unknown };
+          if (literalPrimitive.literal === discriminatorValue) {
+            matchingVariantKey = variantKey;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (!matchingVariantKey) {
+      // No matching variant found - return value as-is
+      return value as InferState<T>;
+    }
+    
+    // Apply defaults using the matching variant's struct
+    const variantPrimitive = unionPrimitive._schema.variants[matchingVariantKey]!;
+    return applyDefaults(variantPrimitive, value as Partial<InferState<typeof variantPrimitive>>) as InferState<T>;
+  }
+  
+  // For other primitives, return the value as-is
   return value as InferState<T>;
 }
 

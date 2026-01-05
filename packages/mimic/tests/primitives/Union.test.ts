@@ -155,6 +155,95 @@ describe("UnionPrimitive", () => {
         content: "default",
       });
     });
+
+    it("return correct defaults for nested structs when global default is set", () => {
+      const stringVariableTypeSchema = Primitive.Struct({
+        key: Primitive.Literal("string"),
+        value: Primitive.String(),
+      });
+      
+      const numberVariableTypeSchema = Primitive.Struct({
+        key: Primitive.Literal("number"),
+        value: Primitive.Number(),
+      });
+
+
+      const variableTypeSchema = Primitive.Union({
+        discriminator: "key",
+        variants: {
+          string: stringVariableTypeSchema,
+          number: numberVariableTypeSchema,
+        },
+      }).default({
+        key: "string",
+        value: "",
+      });
+      
+      expect(variableTypeSchema._internal.getInitialState()).toEqual({
+        key: "string",
+        value: "",
+      });
+    });
+
+    it("return correct defaults for nested structs when variant default is set", () => {
+      const stringVariableTypeSchema = Primitive.Struct({
+        key: Primitive.Literal("string"),
+        value: Primitive.String().default(""),
+      });
+      
+      const numberVariableTypeSchema = Primitive.Struct({
+        key: Primitive.Literal("number"),
+        value: Primitive.Number().default(10),
+      });
+
+
+      const variableTypeSchema = Primitive.Union({
+        discriminator: "key",
+        variants: {
+          string: stringVariableTypeSchema,
+          number: numberVariableTypeSchema,
+        },
+      }).default({
+        key: "number",
+      });
+      
+      expect(variableTypeSchema._internal.getInitialState()).toEqual({
+        key: "number",
+        value: 10,
+      });
+    });
+
+    it("set() applies defaults to generated operation payload", () => {
+      const stringVariableTypeSchema = Primitive.Struct({
+        key: Primitive.Literal("string"),
+        value: Primitive.String().default(""),
+      });
+      
+      const numberVariableTypeSchema = Primitive.Struct({
+        key: Primitive.Literal("number"),
+        value: Primitive.Number().default(10),
+      });
+
+
+      const variableTypeSchema = Primitive.Union({
+        discriminator: "key",
+        variants: {
+          string: stringVariableTypeSchema,
+          number: numberVariableTypeSchema,
+        },
+      });
+
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const proxy = variableTypeSchema._internal.createProxy(ProxyEnvironment.make((op) => operations.push(op)), OperationPath.make(""));
+      proxy.set({ key: "number" });
+      
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("union.set");
+      expect(operations[0]!.payload).toEqual({
+        key: "number",
+        value: 10,
+      });
+    });
   });
 
   describe("custom discriminator", () => {
@@ -208,3 +297,258 @@ describe("UnionPrimitive", () => {
 // =============================================================================
 // Integration Tests - Complex Nested Structures
 // =============================================================================
+
+describe("Union defaults in nested structures", () => {
+  // Schema matching the production use case
+  const stringVariableTypeSchema = Primitive.Struct({
+    key: Primitive.Literal("string"),
+    value: Primitive.String().default(""),
+  });
+
+  const numberVariableTypeSchema = Primitive.Struct({
+    key: Primitive.Literal("number"),
+    value: Primitive.Number().default(0),
+  });
+
+  const booleanVariableTypeSchema = Primitive.Struct({
+    key: Primitive.Literal("boolean"),
+    value: Primitive.Boolean().default(false),
+  });
+
+  const productVariableTypeSchema = Primitive.Struct({
+    key: Primitive.Literal("product"),
+    value: Primitive.Struct({
+      productId: Primitive.Either(
+        Primitive.String(),
+        Primitive.Literal(null),
+      ),
+    }).default({
+      productId: null,
+    }),
+  });
+
+  const variableTypeSchema = Primitive.Union({
+    discriminator: "key",
+    variants: {
+      string: stringVariableTypeSchema,
+      number: numberVariableTypeSchema,
+      boolean: booleanVariableTypeSchema,
+      product: productVariableTypeSchema,
+    },
+  });
+
+  const variableSchema = Primitive.Struct({
+    id: Primitive.String(),
+    name: Primitive.String(),
+    value: variableTypeSchema,
+  });
+
+  describe("Struct.set() with nested Union", () => {
+    it("applies Union variant defaults when setting partial Union value", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variableSchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.set({
+        id: "var-1",
+        name: "test",
+        value: { key: "number" },
+      });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+      expect(operations[0]!.payload).toEqual({
+        id: "var-1",
+        name: "test",
+        value: {
+          key: "number",
+          value: 0,
+        },
+      });
+    });
+
+    it("applies Union variant defaults for string type", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variableSchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.set({
+        id: "var-1",
+        name: "test",
+        value: { key: "string" },
+      });
+
+      expect(operations[0]!.payload).toEqual({
+        id: "var-1",
+        name: "test",
+        value: {
+          key: "string",
+          value: "",
+        },
+      });
+    });
+
+    it("applies Union variant defaults for boolean type", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variableSchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.set({
+        id: "var-1",
+        name: "test",
+        value: { key: "boolean" },
+      });
+
+      expect(operations[0]!.payload).toEqual({
+        id: "var-1",
+        name: "test",
+        value: {
+          key: "boolean",
+          value: false,
+        },
+      });
+    });
+
+    it("applies Union variant defaults for nested struct (product type)", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variableSchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.set({
+        id: "var-1",
+        name: "test",
+        value: { key: "product" },
+      });
+
+      expect(operations[0]!.payload).toEqual({
+        id: "var-1",
+        name: "test",
+        value: {
+          key: "product",
+          value: {
+            productId: null,
+          },
+        },
+      });
+    });
+
+    it("preserves explicitly provided Union values", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variableSchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.set({
+        id: "var-1",
+        name: "test",
+        value: { key: "number", value: 42 },
+      });
+
+      expect(operations[0]!.payload).toEqual({
+        id: "var-1",
+        name: "test",
+        value: {
+          key: "number",
+          value: 42,
+        },
+      });
+    });
+  });
+
+  describe("Array.push() with Struct containing Union", () => {
+    const variablesArraySchema = Primitive.Array(variableSchema);
+
+    it("applies Union variant defaults when pushing with partial Union value", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variablesArraySchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.push({
+        id: "var-1",
+        name: "test",
+        value: { key: "number" },
+      });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("array.insert");
+      expect(operations[0]!.payload.value).toEqual({
+        id: "var-1",
+        name: "test",
+        value: {
+          key: "number",
+          value: 0,
+        },
+      });
+    });
+
+    it("applies Union variant defaults for all variant types", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variablesArraySchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.push({ id: "var-1", name: "str", value: { key: "string" } });
+      proxy.push({ id: "var-2", name: "num", value: { key: "number" } });
+      proxy.push({ id: "var-3", name: "bool", value: { key: "boolean" } });
+      proxy.push({ id: "var-4", name: "prod", value: { key: "product" } });
+
+      expect(operations[0]!.payload.value.value).toEqual({ key: "string", value: "" });
+      expect(operations[1]!.payload.value.value).toEqual({ key: "number", value: 0 });
+      expect(operations[2]!.payload.value.value).toEqual({ key: "boolean", value: false });
+      expect(operations[3]!.payload.value.value).toEqual({ key: "product", value: { productId: null } });
+    });
+  });
+
+  describe("Array.set() with Struct containing Union", () => {
+    const variablesArraySchema = Primitive.Array(variableSchema);
+
+    it("applies Union variant defaults when setting array with partial Union values", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variablesArraySchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.set([
+        { id: "var-1", name: "str", value: { key: "string" } },
+        { id: "var-2", name: "num", value: { key: "number" } },
+      ]);
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("array.set");
+      expect(operations[0]!.payload[0].value).toEqual({
+        id: "var-1",
+        name: "str",
+        value: { key: "string", value: "" },
+      });
+      expect(operations[0]!.payload[1].value).toEqual({
+        id: "var-2",
+        name: "num",
+        value: { key: "number", value: 0 },
+      });
+    });
+  });
+
+  describe("Array.insertAt() with Struct containing Union", () => {
+    const variablesArraySchema = Primitive.Array(variableSchema);
+
+    it("applies Union variant defaults when inserting with partial Union value", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => operations.push(op));
+      const proxy = variablesArraySchema._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.insertAt(0, {
+        id: "var-1",
+        name: "test",
+        value: { key: "boolean" },
+      });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("array.insert");
+      expect(operations[0]!.payload.value).toEqual({
+        id: "var-1",
+        name: "test",
+        value: {
+          key: "boolean",
+          value: false,
+        },
+      });
+    });
+  });
+});
