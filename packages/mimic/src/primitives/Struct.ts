@@ -82,6 +82,22 @@ export type StructUpdateValue<TFields extends Record<string, AnyPrimitive>> = {
 };
 
 /**
+ * Transforms a primitive type to make it optional (TRequired = false).
+ * Preserves the primitive structure while changing the required flag.
+ */
+export type MakeOptional<T extends AnyPrimitive> = T extends Primitive<infer S, infer P, any, infer H, infer SI, infer UI>
+  ? Primitive<S, P, false, H, SI, UI>
+  : T;
+
+/**
+ * Maps each field in a struct to its optional version.
+ * All fields become optional (TRequired = false).
+ */
+export type PartialFields<TFields extends Record<string, AnyPrimitive>> = {
+  [K in keyof TFields]: MakeOptional<TFields[K]>;
+};
+
+/**
  * Maps a schema definition to its proxy type.
  * Provides nested field access + get()/set()/toSnapshot() methods for the whole struct.
  */
@@ -160,6 +176,48 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TRequ
       ...this._schema,
       validators: [...this._schema.validators, { validate: fn, message }],
     });
+  }
+
+  /** Extend this struct with additional fields */
+  extend<TNewFields extends Record<string, AnyPrimitive>>(
+    newFields: TNewFields
+  ): StructPrimitive<TFields & TNewFields, TRequired, THasDefault> {
+    return new StructPrimitive<TFields & TNewFields, TRequired, THasDefault>({
+      required: this._schema.required,
+      defaultValue: undefined,
+      fields: { ...this._schema.fields, ...newFields } as TFields & TNewFields,
+      validators: [],
+    });
+  }
+
+  /** Make all properties of this struct optional (TRequired = false for all fields) */
+  partial(): StructPrimitive<PartialFields<TFields>, TRequired, THasDefault> {
+    const partialFields: Record<string, AnyPrimitive> = {};
+    for (const key in this._schema.fields) {
+      const field = this._schema.fields[key]!;
+      // Create a new field that is not required (optional)
+      partialFields[key] = this._makeFieldOptional(field);
+    }
+    return new StructPrimitive<PartialFields<TFields>, TRequired, THasDefault>({
+      required: this._schema.required,
+      defaultValue: undefined,
+      fields: partialFields as PartialFields<TFields>,
+      validators: [],
+    });
+  }
+
+  private _makeFieldOptional(field: AnyPrimitive): AnyPrimitive {
+    // Create a new primitive with required: false
+    // We access the _schema property if available, otherwise return as-is
+    const fieldAny = field as any;
+    if (fieldAny._schema && typeof fieldAny._schema === "object") {
+      const Constructor = field.constructor as new (schema: any) => AnyPrimitive;
+      return new Constructor({
+        ...fieldAny._schema,
+        required: false,
+      });
+    }
+    return field;
   }
 
   readonly _internal: PrimitiveInternal<InferStructState<TFields>, StructProxy<TFields, TRequired, THasDefault>> = {

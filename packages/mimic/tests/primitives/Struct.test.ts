@@ -554,6 +554,352 @@ describe("StructPrimitive", () => {
       expect(operations[0]!.path.toTokens()).toEqual(["users", "0", "name"]);
     });
   });
+  describe("extend", () => {
+    it("extends struct with additional fields", () => {
+      const basePrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+      });
+
+      const extendedPrimitive = basePrimitive.extend({
+        email: Primitive.String().required(),
+        age: Primitive.Number(),
+      });
+
+      // Verify fields exist
+      expect(extendedPrimitive.fields).toHaveProperty("name");
+      expect(extendedPrimitive.fields).toHaveProperty("email");
+      expect(extendedPrimitive.fields).toHaveProperty("age");
+    });
+
+    it("extended struct generates correct operations", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const basePrimitive = Primitive.Struct({
+        name: Primitive.String(),
+      });
+
+      const extendedPrimitive = basePrimitive.extend({
+        email: Primitive.String(),
+      });
+
+      const proxy = extendedPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.name.set("John");
+      proxy.email.set("john@example.com");
+
+      expect(operations).toHaveLength(2);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.payload).toBe("John");
+      expect(operations[0]!.path.toTokens()).toEqual(["name"]);
+      expect(operations[1]!.kind).toBe("string.set");
+      expect(operations[1]!.payload).toBe("john@example.com");
+      expect(operations[1]!.path.toTokens()).toEqual(["email"]);
+    });
+
+    it("extended struct set() works with all fields", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const basePrimitive = Primitive.Struct({
+        name: Primitive.String(),
+      });
+
+      const extendedPrimitive = basePrimitive.extend({
+        email: Primitive.String(),
+      });
+
+      const proxy = extendedPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.set({ name: "John", email: "john@example.com" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+      expect(operations[0]!.payload).toEqual({ name: "John", email: "john@example.com" });
+    });
+
+    it("extended struct preserves required status", () => {
+      const basePrimitive = Primitive.Struct({
+        name: Primitive.String(),
+      }).required();
+
+      const extendedPrimitive = basePrimitive.extend({
+        email: Primitive.String(),
+      });
+
+      // The extended struct should still be required - verify via type system
+      // Compile-time check: if the type doesn't match, this would be a type error
+      type ExtendedTRequired = typeof extendedPrimitive._TRequired;
+      const _typeCheck: ExtendedTRequired = true as const;
+      expect(_typeCheck).toBe(true);
+    });
+
+    it("extended struct applyOperation works for both base and new fields", () => {
+      const basePrimitive = Primitive.Struct({
+        name: Primitive.String(),
+      });
+
+      const extendedPrimitive = basePrimitive.extend({
+        email: Primitive.String(),
+      });
+
+      const nameOperation: Operation.Operation<any, any, any> = {
+        kind: "string.set",
+        path: OperationPath.make("name"),
+        payload: "John",
+      };
+
+      const emailOperation: Operation.Operation<any, any, any> = {
+        kind: "string.set",
+        path: OperationPath.make("email"),
+        payload: "john@example.com",
+      };
+
+      let state = extendedPrimitive._internal.applyOperation(undefined, nameOperation);
+      state = extendedPrimitive._internal.applyOperation(state, emailOperation);
+
+      expect(state).toEqual({ name: "John", email: "john@example.com" });
+    });
+
+    it("can chain multiple extend calls", () => {
+      const basePrimitive = Primitive.Struct({
+        id: Primitive.String(),
+      });
+
+      const extendedOnce = basePrimitive.extend({
+        name: Primitive.String(),
+      });
+
+      const extendedTwice = extendedOnce.extend({
+        email: Primitive.String(),
+      });
+
+      expect(extendedTwice.fields).toHaveProperty("id");
+      expect(extendedTwice.fields).toHaveProperty("name");
+      expect(extendedTwice.fields).toHaveProperty("email");
+    });
+
+    it("extend with nested struct works correctly", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const basePrimitive = Primitive.Struct({
+        name: Primitive.String(),
+      });
+
+      const addressPrimitive = Primitive.Struct({
+        city: Primitive.String(),
+        zip: Primitive.String(),
+      });
+
+      const extendedPrimitive = basePrimitive.extend({
+        address: addressPrimitive,
+      });
+
+      const proxy = extendedPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.address.city.set("New York");
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.payload).toBe("New York");
+      expect(operations[0]!.path.toTokens()).toEqual(["address", "city"]);
+    });
+  });
+
+  describe("partial", () => {
+    it("makes all fields optional", () => {
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        email: Primitive.String().required(),
+        age: Primitive.Number().required(),
+      });
+
+      const partialPrimitive = structPrimitive.partial();
+
+      // All fields should now be optional (not required)
+      expect(partialPrimitive.fields).toHaveProperty("name");
+      expect(partialPrimitive.fields).toHaveProperty("email");
+      expect(partialPrimitive.fields).toHaveProperty("age");
+    });
+
+    it("partial struct allows empty set()", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        email: Primitive.String().required(),
+      });
+
+      const partialPrimitive = structPrimitive.partial();
+
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      // This should work without providing any fields since all are optional
+      proxy.set({});
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+    });
+
+    it("partial struct allows partial set()", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        email: Primitive.String().required(),
+        age: Primitive.Number().required(),
+      });
+
+      const partialPrimitive = structPrimitive.partial();
+
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      // Only provide some fields
+      proxy.set({ name: "John" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+      expect(operations[0]!.payload).toHaveProperty("name", "John");
+    });
+
+    it("partial struct field access still works", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        email: Primitive.String().required(),
+      });
+
+      const partialPrimitive = structPrimitive.partial();
+
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.name.set("John");
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.payload).toBe("John");
+      expect(operations[0]!.path.toTokens()).toEqual(["name"]);
+    });
+
+    it("partial struct preserves required/default status of struct itself", () => {
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+      }).required();
+
+      const partialPrimitive = structPrimitive.partial();
+      // The struct itself should still be required - verify via type system
+      // Compile-time check: if the type doesn't match, this would be a type error
+      type PartialTRequired = typeof partialPrimitive._TRequired;
+      const _typeCheck: PartialTRequired = true as const;
+      expect(_typeCheck).toBe(true);
+    });
+
+    it("partial struct applyOperation works correctly", () => {
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        email: Primitive.String().required(),
+      });
+
+      const partialPrimitive = structPrimitive.partial();
+
+      const operation: Operation.Operation<any, any, any> = {
+        kind: "string.set",
+        path: OperationPath.make("name"),
+        payload: "John",
+      };
+
+      const result = partialPrimitive._internal.applyOperation(undefined, operation);
+
+      expect(result).toEqual({ name: "John" });
+    });
+
+    it("partial can be combined with extend", () => {
+      const basePrimitive = Primitive.Struct({
+        id: Primitive.String().required(),
+        name: Primitive.String().required(),
+      });
+
+      // First extend, then partial
+      const extendedPartial = basePrimitive
+        .extend({
+          email: Primitive.String().required(),
+        })
+        .partial();
+
+      expect(extendedPartial.fields).toHaveProperty("id");
+      expect(extendedPartial.fields).toHaveProperty("name");
+      expect(extendedPartial.fields).toHaveProperty("email");
+    });
+
+    it("partial works with nested structs", () => {
+      const addressPrimitive = Primitive.Struct({
+        city: Primitive.String().required(),
+        zip: Primitive.String().required(),
+      });
+
+      const personPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        address: addressPrimitive.required(),
+      });
+
+      const partialPrimitive = personPrimitive.partial();
+
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      // Nested struct access should still work
+      proxy.address.city.set("New York");
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.payload).toBe("New York");
+      expect(operations[0]!.path.toTokens()).toEqual(["address", "city"]);
+    });
+
+    it("partial struct update() works correctly", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        email: Primitive.String().required(),
+        age: Primitive.Number().required(),
+      });
+
+      const partialPrimitive = structPrimitive.partial();
+
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.update({ name: "Jane" });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("string.set");
+      expect(operations[0]!.payload).toBe("Jane");
+    });
+  });
 });
 
 // =============================================================================
