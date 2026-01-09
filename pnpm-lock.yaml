@@ -6,12 +6,18 @@ settings:
 
 catalogs:
   default:
+    '@effect/cluster':
+      specifier: ^0.55.0
+      version: 0.55.0
     '@effect/platform':
       specifier: ^0.93.8
       version: 0.93.8
     '@effect/platform-bun':
       specifier: ^0.86.0
       version: 0.86.0
+    '@effect/rpc':
+      specifier: ^0.72.2
+      version: 0.72.2
     effect:
       specifier: ^3.19.12
       version: 3.19.13
@@ -165,6 +171,49 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)
 
+  examples/mimic-example-server-cluster:
+    dependencies:
+      '@effect/cluster':
+        specifier: 'catalog:'
+        version: 0.55.0(@effect/platform@0.93.8(effect@3.19.13))(@effect/rpc@0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/sql@0.48.6(@effect/experimental@0.57.11(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/workflow@0.15.2(@effect/experimental@0.57.11(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(@effect/rpc@0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)
+      '@effect/platform':
+        specifier: 'catalog:'
+        version: 0.93.8(effect@3.19.13)
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 0.86.0(@effect/cluster@0.55.0(@effect/platform@0.93.8(effect@3.19.13))(@effect/rpc@0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/sql@0.48.6(@effect/experimental@0.57.11(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/workflow@0.15.2(@effect/experimental@0.57.11(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(@effect/rpc@0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(@effect/rpc@0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/sql@0.48.6(@effect/experimental@0.57.11(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)
+      '@effect/rpc':
+        specifier: 'catalog:'
+        version: 0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13)
+      '@voidhash/mimic':
+        specifier: workspace:*
+        version: link:../../packages/mimic
+      '@voidhash/mimic-effect':
+        specifier: workspace:*
+        version: link:../../packages/mimic-effect
+      '@voidhash/mimic-example-shared':
+        specifier: workspace:*
+        version: link:../mimic-example-shared
+      effect:
+        specifier: 'catalog:'
+        version: 3.19.13
+    devDependencies:
+      '@effect/vitest':
+        specifier: ^0.26.0
+        version: 0.26.0(effect@3.19.13)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+      '@voidhash/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      typescript:
+        specifier: 5.8.3
+        version: 5.8.3
+      vite-tsconfig-paths:
+        specifier: ^5.1.4
+        version: 5.1.4(typescript@5.8.3)(vite@7.3.0(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)
+
   examples/mimic-example-shared:
     dependencies:
       '@voidhash/mimic':
@@ -216,6 +265,43 @@ importers:
         version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)
 
   packages/mimic-effect:
+    dependencies:
+      '@effect/cluster':
+        specifier: 'catalog:'
+        version: 0.55.0(@effect/platform@0.93.8(effect@3.19.13))(@effect/rpc@0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/sql@0.48.6(@effect/experimental@0.57.11(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/workflow@0.15.2(@effect/experimental@0.57.11(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(@effect/rpc@0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)
+      '@effect/platform':
+        specifier: 'catalog:'
+        version: 0.93.8(effect@3.19.13)
+      '@effect/rpc':
+        specifier: 'catalog:'
+        version: 0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13)
+      '@voidhash/mimic':
+        specifier: workspace:*
+        version: link:../mimic
+      effect:
+        specifier: 'catalog:'
+        version: 3.19.13
+    devDependencies:
+      '@effect/vitest':
+        specifier: ^0.26.0
+        version: 0.26.0(effect@3.19.13)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+      '@voidhash/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      tsdown:
+        specifier: ^0.18.2
+        version: 0.18.2(typescript@5.8.3)
+      typescript:
+        specifier: 5.8.3
+        version: 5.8.3
+      vite-tsconfig-paths:
+        specifier: ^5.1.4
+        version: 5.1.4(typescript@5.8.3)(vite@7.3.0(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)
+
+  packages/mimic-effect-legacy:
     dependencies:
       '@effect/platform':
         specifier: 'catalog:'

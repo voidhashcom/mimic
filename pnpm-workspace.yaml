@@ -3,8 +3,10 @@ packages:
   - packages/*
 
 catalog:
+  '@effect/cluster': ^0.55.0
   '@effect/platform': ^0.93.8
   '@effect/platform-bun': ^0.86.0
+  '@effect/rpc': ^0.72.2
   effect: ^3.19.12
 
 onlyBuiltDependencies:

@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
-import * as Effect from "effect/Effect";
-import * as Stream from "effect/Stream";
-import * as Layer from "effect/Layer";
-import * as Fiber from "effect/Fiber";
-import { Primitive, OperationPath, Document, Transaction } from "@voidhash/mimic";
-import * as DocumentManager from "../src/DocumentManager";
-import * as MimicConfig from "../src/MimicConfig";
-import * as InMemoryDataStorage from "../src/storage/InMemoryDataStorage";
+import { Effect, Layer, Stream, Fiber, Duration } from "effect";
+import { Primitive, Document, Transaction } from "@voidhash/mimic";
+import {
+  DocumentManager,
+  DocumentManagerTag,
+  DocumentManagerConfigTag,
+} from "../src/DocumentManager.js";
+import { ColdStorage } from "../src/ColdStorage.js";
+import { HotStorage } from "../src/HotStorage.js";
+import type { ResolvedConfig } from "../src/Types.js";
 
 // =============================================================================
 // Test Schema
@@ -21,15 +23,33 @@ const TestSchema = Primitive.Struct({
 // Test Layer
 // =============================================================================
 
-const makeTestLayer = () => {
-  const configLayer = MimicConfig.layer({
+const makeTestLayer = (options?: {
+  initial?: { title?: string; count?: number };
+}) => {
+  const config: ResolvedConfig<typeof TestSchema> = {
     schema: TestSchema,
+    initial: options?.initial,
+    presence: undefined,
+    maxIdleTime: Duration.minutes(5),
     maxTransactionHistory: 100,
-  });
+    snapshot: {
+      interval: Duration.minutes(5),
+      transactionThreshold: 100,
+    },
+    basePath: "/mimic",
+    heartbeatInterval: Duration.seconds(30),
+    heartbeatTimeout: Duration.seconds(10),
+  };
+
+  const configLayer = Layer.succeed(
+    DocumentManagerConfigTag,
+    config as ResolvedConfig<Primitive.AnyPrimitive>
+  );
 
   return DocumentManager.layer.pipe(
     Layer.provide(configLayer),
-    Layer.provide(InMemoryDataStorage.layer)
+    Layer.provide(ColdStorage.InMemory.make()),
+    Layer.provide(HotStorage.InMemory.make())
   );
 };
 
@@ -37,20 +57,16 @@ const makeTestLayer = () => {
 // Helper Functions
 // =============================================================================
 
-/**
- * Create a valid operation using the Document API
- */
-const createValidTransaction = (id: string, title: string): Transaction.Transaction => {
+const createValidTransaction = (
+  id: string,
+  title: string
+): Transaction.Transaction => {
   const doc = Document.make(TestSchema);
   doc.transaction((root) => {
     root.title.set(title);
   });
   const tx = doc.flush();
-  // Override the ID to make it deterministic for tests
-  return {
-    ...tx,
-    id,
-  };
+  return { ...tx, id };
 };
 
 const createEmptyTransaction = (id: string): Transaction.Transaction => ({
@@ -67,11 +83,13 @@ describe("DocumentManager", () => {
   describe("submit", () => {
     it("should accept valid transactions", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          const tx = createValidTransaction("tx-1", "Hello World");
-          return yield* manager.submit("doc-1", tx);
-        }).pipe(Effect.provide(makeTestLayer()))
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
+            const tx = createValidTransaction("tx-1", "Hello World");
+            return yield* manager.submit("doc-1", tx);
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result.success).toBe(true);
@@ -82,11 +100,13 @@ describe("DocumentManager", () => {
 
     it("should reject empty transactions", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          const tx = createEmptyTransaction("tx-empty");
-          return yield* manager.submit("doc-1", tx);
-        }).pipe(Effect.provide(makeTestLayer()))
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
+            const tx = createEmptyTransaction("tx-empty");
+            return yield* manager.submit("doc-1", tx);
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result.success).toBe(false);
@@ -97,18 +117,17 @@ describe("DocumentManager", () => {
 
     it("should reject duplicate transactions", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          const tx = createValidTransaction("tx-dup", "First");
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
+            const tx = createValidTransaction("tx-dup", "First");
 
-          // Submit first time
-          const first = yield* manager.submit("doc-1", tx);
+            const first = yield* manager.submit("doc-1", tx);
+            const second = yield* manager.submit("doc-1", tx);
 
-          // Submit same transaction again
-          const second = yield* manager.submit("doc-1", tx);
-
-          return { first, second };
-        }).pipe(Effect.provide(makeTestLayer()))
+            return { first, second };
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result.first.success).toBe(true);
@@ -122,19 +141,21 @@ describe("DocumentManager", () => {
 
     it("should increment version with each successful transaction", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
 
-          const tx1 = createValidTransaction("tx-1", "One");
-          const tx2 = createValidTransaction("tx-2", "Two");
-          const tx3 = createValidTransaction("tx-3", "Three");
+            const tx1 = createValidTransaction("tx-1", "One");
+            const tx2 = createValidTransaction("tx-2", "Two");
+            const tx3 = createValidTransaction("tx-3", "Three");
 
-          const r1 = yield* manager.submit("doc-1", tx1);
-          const r2 = yield* manager.submit("doc-1", tx2);
-          const r3 = yield* manager.submit("doc-1", tx3);
+            const r1 = yield* manager.submit("doc-1", tx1);
+            const r2 = yield* manager.submit("doc-1", tx2);
+            const r3 = yield* manager.submit("doc-1", tx3);
 
-          return { r1, r2, r3 };
-        }).pipe(Effect.provide(makeTestLayer()))
+            return { r1, r2, r3 };
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result.r1.success).toBe(true);
@@ -150,23 +171,24 @@ describe("DocumentManager", () => {
 
     it("should handle different documents independently", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
 
-          const txDoc1 = createValidTransaction("tx-doc1", "Doc 1");
-          const txDoc2 = createValidTransaction("tx-doc2", "Doc 2");
+            const txDoc1 = createValidTransaction("tx-doc1", "Doc 1");
+            const txDoc2 = createValidTransaction("tx-doc2", "Doc 2");
 
-          const r1 = yield* manager.submit("doc-1", txDoc1);
-          const r2 = yield* manager.submit("doc-2", txDoc2);
+            const r1 = yield* manager.submit("doc-1", txDoc1);
+            const r2 = yield* manager.submit("doc-2", txDoc2);
 
-          return { r1, r2 };
-        }).pipe(Effect.provide(makeTestLayer()))
+            return { r1, r2 };
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result.r1.success).toBe(true);
       expect(result.r2.success).toBe(true);
 
-      // Both should have version 1 since they are independent documents
       if (result.r1.success && result.r2.success) {
         expect(result.r1.version).toBe(1);
         expect(result.r2.version).toBe(1);
@@ -177,134 +199,124 @@ describe("DocumentManager", () => {
   describe("getSnapshot", () => {
     it("should return initial snapshot for new document", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          return yield* manager.getSnapshot("new-doc");
-        }).pipe(Effect.provide(makeTestLayer()))
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
+            return yield* manager.getSnapshot("new-doc");
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result.type).toBe("snapshot");
       expect(result.version).toBe(0);
-      // Initial state from schema defaults
       expect(result.state).toEqual({ title: "", count: 0 });
     });
 
     it("should return current state after transactions", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
 
-          // Apply a transaction
-          const tx = createValidTransaction("tx-1", "Updated Title");
-          yield* manager.submit("doc-1", tx);
+            const tx = createValidTransaction("tx-1", "Updated Title");
+            yield* manager.submit("doc-1", tx);
 
-          return yield* manager.getSnapshot("doc-1");
-        }).pipe(Effect.provide(makeTestLayer()))
+            return yield* manager.getSnapshot("doc-1");
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result.type).toBe("snapshot");
       expect(result.version).toBe(1);
-      expect((result.state as any).title).toBe("Updated Title");
+      expect((result.state as { title: string }).title).toBe("Updated Title");
     });
 
-    it("should return snapshot for specific document", async () => {
+    it("should use initial state for new documents", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-
-          // Apply transactions to different documents
-          const tx1 = createValidTransaction("tx-1", "Doc One");
-          const tx2 = createValidTransaction("tx-2", "Doc Two");
-
-          yield* manager.submit("doc-1", tx1);
-          yield* manager.submit("doc-2", tx2);
-
-          const snap1 = yield* manager.getSnapshot("doc-1");
-          const snap2 = yield* manager.getSnapshot("doc-2");
-
-          return { snap1, snap2 };
-        }).pipe(Effect.provide(makeTestLayer()))
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
+            return yield* manager.getSnapshot("new-doc");
+          })
+        ).pipe(
+          Effect.provide(
+            makeTestLayer({ initial: { title: "Initial Title", count: 42 } })
+          )
+        )
       );
 
-      expect((result.snap1.state as any).title).toBe("Doc One");
-      expect((result.snap2.state as any).title).toBe("Doc Two");
+      expect(result.type).toBe("snapshot");
+      expect(result.version).toBe(0);
+      expect(result.state).toEqual({ title: "Initial Title", count: 42 });
     });
   });
 
   describe("subscribe", () => {
     it("should receive broadcasts for submitted transactions", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
 
-          // Subscribe to the document
-          const broadcastStream = yield* manager.subscribe("doc-1");
+            const broadcastStream = yield* manager.subscribe("doc-1");
 
-          // Submit a transaction
-          const tx = createValidTransaction("tx-broadcast", "Broadcast Test");
+            const collectFiber = yield* Effect.fork(
+              broadcastStream.pipe(Stream.take(1), Stream.runCollect)
+            );
 
-          // Start collecting broadcasts in parallel
-          const collectFiber = yield* Effect.fork(
-            broadcastStream.pipe(Stream.take(1), Stream.runCollect)
-          );
+            yield* Effect.sleep(50);
 
-          // Small delay to ensure subscription is ready
-          yield* Effect.sleep(50);
+            const tx = createValidTransaction("tx-broadcast", "Broadcast Test");
+            yield* manager.submit("doc-1", tx);
 
-          // Submit the transaction
-          yield* manager.submit("doc-1", tx);
+            const broadcasts = yield* Fiber.join(collectFiber).pipe(
+              Effect.timeout(2000)
+            );
 
-          // Wait for the broadcast with Fiber.join
-          const broadcasts = yield* Fiber.join(collectFiber).pipe(
-            Effect.timeout(2000)
-          );
-
-          return broadcasts;
-        }).pipe(Effect.scoped, Effect.provide(makeTestLayer()))
+            return broadcasts;
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result).toBeDefined();
       if (result) {
         const broadcasts = Array.from(result);
         expect(broadcasts.length).toBe(1);
-        expect(broadcasts[0].type).toBe("transaction");
+        expect(broadcasts[0]!.type).toBe("transaction");
       }
     });
 
     it("should broadcast to multiple subscribers", async () => {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* DocumentManagerTag;
 
-          // Subscribe twice to the same document
-          const stream1 = yield* manager.subscribe("doc-1");
-          const stream2 = yield* manager.subscribe("doc-1");
+            const stream1 = yield* manager.subscribe("doc-1");
+            const stream2 = yield* manager.subscribe("doc-1");
 
-          // Start collecting broadcasts in parallel
-          const collectFiber1 = yield* Effect.fork(
-            stream1.pipe(Stream.take(1), Stream.runCollect)
-          );
-          const collectFiber2 = yield* Effect.fork(
-            stream2.pipe(Stream.take(1), Stream.runCollect)
-          );
+            const collectFiber1 = yield* Effect.fork(
+              stream1.pipe(Stream.take(1), Stream.runCollect)
+            );
+            const collectFiber2 = yield* Effect.fork(
+              stream2.pipe(Stream.take(1), Stream.runCollect)
+            );
 
-          // Small delay to ensure subscriptions are ready
-          yield* Effect.sleep(50);
+            yield* Effect.sleep(50);
 
-          // Submit a transaction
-          const tx = createValidTransaction("tx-multi", "Multi Broadcast");
-          yield* manager.submit("doc-1", tx);
+            const tx = createValidTransaction("tx-multi", "Multi Broadcast");
+            yield* manager.submit("doc-1", tx);
 
-          // Wait for both broadcasts with Fiber.join
-          const broadcasts1 = yield* Fiber.join(collectFiber1).pipe(
-            Effect.timeout(2000)
-          );
-          const broadcasts2 = yield* Fiber.join(collectFiber2).pipe(
-            Effect.timeout(2000)
-          );
+            const broadcasts1 = yield* Fiber.join(collectFiber1).pipe(
+              Effect.timeout(2000)
+            );
+            const broadcasts2 = yield* Fiber.join(collectFiber2).pipe(
+              Effect.timeout(2000)
+            );
 
-          return { broadcasts1, broadcasts2 };
-        }).pipe(Effect.scoped, Effect.provide(makeTestLayer()))
+            return { broadcasts1, broadcasts2 };
+          })
+        ).pipe(Effect.provide(makeTestLayer()))
       );
 
       expect(result.broadcasts1).toBeDefined();
@@ -316,149 +328,11 @@ describe("DocumentManager", () => {
     });
   });
 
-  describe("DocumentManagerTag", () => {
-    it("should have the correct tag identifier", () => {
-      expect(DocumentManager.DocumentManagerTag.key).toBe(
-        "@voidhash/mimic-server-effect/DocumentManager"
+  describe("Tag", () => {
+    it("should have correct identifier", () => {
+      expect(DocumentManagerTag.key).toBe(
+        "@voidhash/mimic-effect/DocumentManager"
       );
-    });
-  });
-
-  describe("layer", () => {
-    it("should require MimicServerConfigTag and MimicDataStorageTag", async () => {
-      // This test verifies the layer composition works correctly
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          return typeof manager.submit === "function";
-        }).pipe(Effect.provide(makeTestLayer()))
-      );
-
-      expect(result).toBe(true);
-    });
-  });
-
-  describe("initial state", () => {
-    const makeTestLayerWithInitial = (initial: { title?: string; count?: number }) => {
-      const configLayer = MimicConfig.layer({
-        schema: TestSchema,
-        maxTransactionHistory: 100,
-        initial,
-      });
-
-      return DocumentManager.layer.pipe(
-        Layer.provide(configLayer),
-        Layer.provide(InMemoryDataStorage.layer)
-      );
-    };
-
-    const makeTestLayerWithInitialFn = (
-      initialFn: (ctx: { documentId: string }) => Effect.Effect<{ title?: string; count?: number }>
-    ) => {
-      const configLayer = MimicConfig.layer({
-        schema: TestSchema,
-        maxTransactionHistory: 100,
-        initial: initialFn,
-      });
-
-      return DocumentManager.layer.pipe(
-        Layer.provide(configLayer),
-        Layer.provide(InMemoryDataStorage.layer)
-      );
-    };
-
-    it("should use initial state for new documents", async () => {
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          return yield* manager.getSnapshot("new-doc");
-        }).pipe(Effect.provide(makeTestLayerWithInitial({ title: "Initial Title", count: 42 })))
-      );
-
-      expect(result.type).toBe("snapshot");
-      expect(result.version).toBe(0);
-      expect(result.state).toEqual({ title: "Initial Title", count: 42 });
-    });
-
-    it("should apply defaults for omitted fields in initial state", async () => {
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          return yield* manager.getSnapshot("new-doc");
-        }).pipe(Effect.provide(makeTestLayerWithInitial({ title: "Only Title" })))
-      );
-
-      expect(result.type).toBe("snapshot");
-      // count should be 0 (default)
-      expect(result.state).toEqual({ title: "Only Title", count: 0 });
-    });
-
-    it("should prefer stored state over initial state", async () => {
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-
-          // Apply a transaction to modify the document
-          const tx = createValidTransaction("tx-1", "Modified Title");
-          yield* manager.submit("doc-1", tx);
-
-          // Get snapshot - should show modified state, not initial
-          return yield* manager.getSnapshot("doc-1");
-        }).pipe(Effect.provide(makeTestLayerWithInitial({ title: "Initial Title", count: 42 })))
-      );
-
-      expect(result.type).toBe("snapshot");
-      expect((result.state as any).title).toBe("Modified Title");
-      // count should still be 42 since we only modified title
-      expect((result.state as any).count).toBe(42);
-    });
-
-    it("should use initial state function with documentId for new documents", async () => {
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          return yield* manager.getSnapshot("my-special-doc");
-        }).pipe(Effect.provide(makeTestLayerWithInitialFn(
-          ({ documentId }) => Effect.succeed({ title: `Doc: ${documentId}`, count: documentId.length })
-        )))
-      );
-
-      expect(result.type).toBe("snapshot");
-      expect(result.version).toBe(0);
-      expect(result.state).toEqual({ title: "Doc: my-special-doc", count: 14 });
-    });
-
-    it("should call initial function with different documentIds", async () => {
-      const layer = makeTestLayerWithInitialFn(
-        ({ documentId }) => Effect.succeed({ title: documentId, count: documentId.length })
-      );
-
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          const snap1 = yield* manager.getSnapshot("short");
-          const snap2 = yield* manager.getSnapshot("longer-document-id");
-          return { snap1, snap2 };
-        }).pipe(Effect.provide(layer))
-      );
-
-      expect(result.snap1.state).toEqual({ title: "short", count: 5 });
-      expect(result.snap2.state).toEqual({ title: "longer-document-id", count: 18 });
-    });
-
-    it("should apply defaults to initial function result", async () => {
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const manager = yield* DocumentManager.DocumentManagerTag;
-          return yield* manager.getSnapshot("test-doc");
-        }).pipe(Effect.provide(makeTestLayerWithInitialFn(
-          ({ documentId }) => Effect.succeed({ title: documentId }) // count omitted
-        )))
-      );
-
-      expect(result.type).toBe("snapshot");
-      // count should be 0 (default)
-      expect(result.state).toEqual({ title: "test-doc", count: 0 });
     });
   });
 });

@@ -1,99 +1,39 @@
 /**
- * @since 0.0.1
- * Presence manager for ephemeral per-connection state.
- * Handles in-memory storage and broadcasting of presence updates.
+ * @voidhash/mimic-effect - PresenceManager
+ *
+ * Internal service for managing presence state per document.
  */
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as PubSub from "effect/PubSub";
-import * as Ref from "effect/Ref";
-import * as HashMap from "effect/HashMap";
-import * as Context from "effect/Context";
-import * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
-import type { Presence } from "@voidhash/mimic";
+import {
+  Context,
+  Effect,
+  HashMap,
+  Layer,
+  Metric,
+  PubSub,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
+import type {
+  PresenceEntry,
+  PresenceEvent,
+  PresenceSnapshot,
+} from "./Types.js";
+import * as Metrics from "./Metrics.js";
 
 // =============================================================================
-// Presence Entry Types
+// PresenceManager Interface
 // =============================================================================
 
 /**
- * A presence entry stored in the manager.
- */
-export interface PresenceEntry {
-  /** The presence data */
-  readonly data: unknown;
-  /** Optional user ID from authentication */
-  readonly userId?: string;
-}
-
-// =============================================================================
-// Presence Events
-// =============================================================================
-
-/**
- * Event emitted when a presence is updated.
- */
-export interface PresenceUpdateEvent {
-  readonly type: "presence_update";
-  /** The connection ID of the user who updated */
-  readonly id: string;
-  /** The presence data */
-  readonly data: unknown;
-  /** Optional user ID from authentication */
-  readonly userId?: string;
-}
-
-/**
- * Event emitted when a presence is removed (user disconnected).
- */
-export interface PresenceRemoveEvent {
-  readonly type: "presence_remove";
-  /** The connection ID of the user who disconnected */
-  readonly id: string;
-}
-
-/**
- * Union of all presence events.
- */
-export type PresenceEvent = PresenceUpdateEvent | PresenceRemoveEvent;
-
-// =============================================================================
-// Presence Snapshot
-// =============================================================================
-
-/**
- * A snapshot of all presence entries for a document.
- */
-export interface PresenceSnapshot {
-  /** Map of connectionId to presence entry */
-  readonly presences: Record<string, PresenceEntry>;
-}
-
-// =============================================================================
-// Document Presence Instance
-// =============================================================================
-
-/**
- * Per-document presence state.
- */
-interface DocumentPresence {
-  /** Map of connectionId to presence entry */
-  readonly entries: Ref.Ref<HashMap.HashMap<string, PresenceEntry>>;
-  /** PubSub for broadcasting presence events */
-  readonly pubsub: PubSub.PubSub<PresenceEvent>;
-}
-
-// =============================================================================
-// Presence Manager Service
-// =============================================================================
-
-/**
- * Service interface for the PresenceManager.
+ * Internal service for managing presence state per document.
+ *
+ * Presence is ephemeral state associated with connections, not persisted.
+ * Each document has its own set of presences, keyed by connectionId.
  */
 export interface PresenceManager {
   /**
-   * Get a snapshot of all presences for a document.
+   * Get snapshot of all presences for a document.
    */
   readonly getSnapshot: (
     documentId: string
@@ -101,7 +41,6 @@ export interface PresenceManager {
 
   /**
    * Set/update presence for a connection.
-   * Broadcasts the update to all subscribers.
    */
   readonly set: (
     documentId: string,
@@ -110,8 +49,7 @@ export interface PresenceManager {
   ) => Effect.Effect<void>;
 
   /**
-   * Remove presence for a connection (e.g., on disconnect).
-   * Broadcasts the removal to all subscribers.
+   * Remove presence for a connection (on disconnect).
    */
   readonly remove: (
     documentId: string,
@@ -120,178 +58,169 @@ export interface PresenceManager {
 
   /**
    * Subscribe to presence events for a document.
-   * Returns a Stream of presence events.
+   * Returns a stream of presence update/remove events.
    */
   readonly subscribe: (
     documentId: string
-  ) => Effect.Effect<
-    Stream.Stream<PresenceEvent>,
-    never,
-    Scope.Scope
-  >;
+  ) => Effect.Effect<Stream.Stream<PresenceEvent>, never, Scope.Scope>;
 }
 
+// =============================================================================
+// Context Tag
+// =============================================================================
+
 /**
- * Context tag for PresenceManager.
+ * Context tag for PresenceManager service
  */
 export class PresenceManagerTag extends Context.Tag(
-  "@voidhash/mimic-server-effect/PresenceManager"
+  "@voidhash/mimic-effect/PresenceManager"
 )<PresenceManagerTag, PresenceManager>() {}
 
 // =============================================================================
-// Presence Manager Implementation
+// Internal Types
 // =============================================================================
 
 /**
- * Create the PresenceManager service.
+ * Per-document presence state
  */
-const makePresenceManager = Effect.gen(function* () {
-  // Map of document ID to document presence state
-  const documents = yield* Ref.make(
-    HashMap.empty<string, DocumentPresence>()
-  );
+interface DocumentPresenceState {
+  readonly presences: HashMap.HashMap<string, PresenceEntry>;
+  readonly pubsub: PubSub.PubSub<PresenceEvent>;
+}
 
-  // Get or create a document presence instance
-  const getOrCreateDocument = (
-    documentId: string
-  ): Effect.Effect<DocumentPresence> =>
-    Effect.gen(function* () {
-      const current = yield* Ref.get(documents);
-      const existing = HashMap.get(current, documentId);
-
-      if (existing._tag === "Some") {
-        return existing.value;
-      }
-
-      // Create new document presence
-      const entries = yield* Ref.make(
-        HashMap.empty<string, PresenceEntry>()
-      );
-      const pubsub = yield* PubSub.unbounded<PresenceEvent>();
-
-      const docPresence: DocumentPresence = {
-        entries,
-        pubsub,
-      };
-
-      // Store in map
-      yield* Ref.update(documents, (map) =>
-        HashMap.set(map, documentId, docPresence)
-      );
-
-      return docPresence;
-    });
-
-  // Get snapshot of all presences for a document
-  const getSnapshot = (documentId: string): Effect.Effect<PresenceSnapshot> =>
-    Effect.gen(function* () {
-      const docPresence = yield* getOrCreateDocument(documentId);
-      const entriesMap = yield* Ref.get(docPresence.entries);
-
-      // Convert HashMap to Record
-      const presences: Record<string, PresenceEntry> = {};
-      for (const [id, entry] of entriesMap) {
-        presences[id] = entry;
-      }
-
-      return { presences };
-    });
-
-  // Set/update presence for a connection
-  const set = (
-    documentId: string,
-    connectionId: string,
-    entry: PresenceEntry
-  ): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const docPresence = yield* getOrCreateDocument(documentId);
-
-      // Update the entry
-      yield* Ref.update(docPresence.entries, (map) =>
-        HashMap.set(map, connectionId, entry)
-      );
-
-      // Broadcast the update
-      yield* PubSub.publish(docPresence.pubsub, {
-        type: "presence_update",
-        id: connectionId,
-        data: entry.data,
-        userId: entry.userId,
-      });
-    });
-
-  // Remove presence for a connection
-  const remove = (
-    documentId: string,
-    connectionId: string
-  ): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const current = yield* Ref.get(documents);
-      const existing = HashMap.get(current, documentId);
-
-      if (existing._tag === "None") {
-        return; // Document doesn't exist, nothing to remove
-      }
-
-      const docPresence = existing.value;
-
-      // Check if the connection has a presence
-      const entries = yield* Ref.get(docPresence.entries);
-      const hasEntry = HashMap.has(entries, connectionId);
-
-      if (!hasEntry) {
-        return; // No presence to remove
-      }
-
-      // Remove the entry
-      yield* Ref.update(docPresence.entries, (map) =>
-        HashMap.remove(map, connectionId)
-      );
-
-      // Broadcast the removal
-      yield* PubSub.publish(docPresence.pubsub, {
-        type: "presence_remove",
-        id: connectionId,
-      });
-    });
-
-  // Subscribe to presence events
-  const subscribe = (
-    documentId: string
-  ): Effect.Effect<Stream.Stream<PresenceEvent>, never, Scope.Scope> =>
-    Effect.gen(function* () {
-      const docPresence = yield* getOrCreateDocument(documentId);
-
-      // Subscribe to the PubSub
-      const queue = yield* PubSub.subscribe(docPresence.pubsub);
-
-      // Convert queue to stream
-      return Stream.fromQueue(queue);
-    });
-
-  const manager: PresenceManager = {
-    getSnapshot,
-    set,
-    remove,
-    subscribe,
-  };
-
-  return manager;
-});
+// =============================================================================
+// Layer Implementation
+// =============================================================================
 
 /**
- * Layer that provides PresenceManager.
+ * Create the PresenceManager layer.
  */
 export const layer: Layer.Layer<PresenceManagerTag> = Layer.effect(
   PresenceManagerTag,
-  makePresenceManager
+  Effect.gen(function* () {
+    // Store: documentId -> DocumentPresenceState
+    const store = yield* Ref.make(
+      HashMap.empty<string, DocumentPresenceState>()
+    );
+
+    /**
+     * Get or create presence state for a document
+     */
+    const getOrCreateDocumentState = (
+      documentId: string
+    ): Effect.Effect<DocumentPresenceState> =>
+      Effect.gen(function* () {
+        const current = yield* Ref.get(store);
+        const existing = HashMap.get(current, documentId);
+        if (existing._tag === "Some") {
+          return existing.value;
+        }
+
+        // Create new state for this document
+        const pubsub = yield* PubSub.unbounded<PresenceEvent>();
+        const state: DocumentPresenceState = {
+          presences: HashMap.empty(),
+          pubsub,
+        };
+
+        yield* Ref.update(store, (map) => HashMap.set(map, documentId, state));
+        return state;
+      });
+
+    return {
+      getSnapshot: (documentId) =>
+        Effect.gen(function* () {
+          const current = yield* Ref.get(store);
+          const existing = HashMap.get(current, documentId);
+          if (existing._tag === "None") {
+            return { presences: {} };
+          }
+
+          // Convert HashMap to Record
+          const presences: Record<string, PresenceEntry> = {};
+          for (const [id, entry] of existing.value.presences) {
+            presences[id] = entry;
+          }
+          return { presences };
+        }),
+
+      set: (documentId, connectionId, entry) =>
+        Effect.gen(function* () {
+          const state = yield* getOrCreateDocumentState(documentId);
+
+          // Update presence in store
+          yield* Ref.update(store, (map) => {
+            const existing = HashMap.get(map, documentId);
+            if (existing._tag === "None") return map;
+            return HashMap.set(map, documentId, {
+              ...existing.value,
+              presences: HashMap.set(
+                existing.value.presences,
+                connectionId,
+                entry
+              ),
+            });
+          });
+
+          // Track metrics
+          yield* Metric.increment(Metrics.presenceUpdates);
+          yield* Metric.incrementBy(Metrics.presenceActive, 1);
+
+          // Broadcast update event
+          const event: PresenceEvent = {
+            type: "presence_update",
+            id: connectionId,
+            data: entry.data,
+            userId: entry.userId,
+          };
+          yield* PubSub.publish(state.pubsub, event);
+        }),
+
+      remove: (documentId, connectionId) =>
+        Effect.gen(function* () {
+          const current = yield* Ref.get(store);
+          const existing = HashMap.get(current, documentId);
+          if (existing._tag === "None") return;
+
+          // Check if presence exists before removing
+          const hasPresence = HashMap.has(existing.value.presences, connectionId);
+          if (!hasPresence) return;
+
+          // Remove presence from store
+          yield* Ref.update(store, (map) => {
+            const docState = HashMap.get(map, documentId);
+            if (docState._tag === "None") return map;
+            return HashMap.set(map, documentId, {
+              ...docState.value,
+              presences: HashMap.remove(docState.value.presences, connectionId),
+            });
+          });
+
+          // Track metrics
+          yield* Metric.incrementBy(Metrics.presenceActive, -1);
+
+          // Broadcast remove event
+          const event: PresenceEvent = {
+            type: "presence_remove",
+            id: connectionId,
+          };
+          yield* PubSub.publish(existing.value.pubsub, event);
+        }),
+
+      subscribe: (documentId) =>
+        Effect.gen(function* () {
+          const state = yield* getOrCreateDocumentState(documentId);
+          return Stream.fromPubSub(state.pubsub);
+        }),
+    };
+  })
 );
 
-/**
- * Default layer that provides PresenceManager.
- * Uses the default priority for layer composition.
- */
-export const layerDefault: Layer.Layer<PresenceManagerTag> = Layer.effectDiscard(
-  Effect.succeed(undefined)
-).pipe(Layer.provideMerge(layer));
+// =============================================================================
+// Re-export namespace
+// =============================================================================
 
+export const PresenceManager = {
+  Tag: PresenceManagerTag,
+  layer,
+};

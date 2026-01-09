@@ -31,7 +31,17 @@
   },
   "peerDependencies": {
     "@effect/platform": "catalog:",
+    "@effect/cluster": "catalog:",
+    "@effect/rpc": "catalog:",
     "@voidhash/mimic": "workspace:*",
     "effect": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@effect/cluster": {
+      "optional": true
+    },
+    "@effect/rpc": {
+      "optional": true
+    }
   }
 }

@@ -1,184 +1,152 @@
 import { describe, it, expect } from "vitest";
-import * as Effect from "effect/Effect";
-import * as MimicAuthService from "../src/MimicAuthService";
-
-// =============================================================================
-// MimicAuthService Tests
-// =============================================================================
+import { Effect, Layer, Context } from "effect";
+import {
+  MimicAuthService,
+  MimicAuthServiceTag,
+} from "../src/MimicAuthService.js";
+import { AuthenticationError } from "../src/Errors.js";
 
 describe("MimicAuthService", () => {
-  describe("make", () => {
-    it("should create auth service with sync handler", async () => {
-      const authService = MimicAuthService.make((token) => ({
-        success: true,
-        userId: `user-${token}`,
-      }));
+  describe("NoAuth", () => {
+    const layer = MimicAuthService.NoAuth.make();
 
+    it("should authenticate any token with write permission", async () => {
       const result = await Effect.runPromise(
-        authService.authenticate("test-token")
+        Effect.gen(function* () {
+          const auth = yield* MimicAuthServiceTag;
+          return yield* auth.authenticate("any-token", "any-doc");
+        }).pipe(Effect.provide(layer))
       );
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.userId).toBe("user-test-token");
-      }
+      expect(result.userId).toBe("anonymous");
+      expect(result.permission).toBe("write");
     });
 
-    it("should create auth service with async handler", async () => {
-      const authService = MimicAuthService.make(async (token) => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        return { success: true, userId: `async-${token}` };
+    it("should work with empty token", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const auth = yield* MimicAuthServiceTag;
+          return yield* auth.authenticate("", "doc-1");
+        }).pipe(Effect.provide(layer))
+      );
+
+      expect(result.userId).toBe("anonymous");
+      expect(result.permission).toBe("write");
+    });
+  });
+
+  describe("Static", () => {
+    it("should return configured permissions", async () => {
+      const layer = MimicAuthService.Static.make({
+        permissions: {
+          "user-1": "write",
+          "user-2": "read",
+        },
       });
 
       const result = await Effect.runPromise(
-        authService.authenticate("async-token")
+        Effect.gen(function* () {
+          const auth = yield* MimicAuthServiceTag;
+          const result1 = yield* auth.authenticate("user-1", "doc-1");
+          const result2 = yield* auth.authenticate("user-2", "doc-1");
+          return { result1, result2 };
+        }).pipe(Effect.provide(layer))
       );
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.userId).toBe("async-async-token");
-      }
+      expect(result.result1.userId).toBe("user-1");
+      expect(result.result1.permission).toBe("write");
+      expect(result.result2.userId).toBe("user-2");
+      expect(result.result2.permission).toBe("read");
     });
 
-    it("should handle auth failure", async () => {
-      const authService = MimicAuthService.make((_token) => ({
-        success: false,
-        error: "Invalid token",
-      }));
+    it("should use default permission for unknown users", async () => {
+      const layer = MimicAuthService.Static.make({
+        permissions: {
+          "user-1": "write",
+        },
+        defaultPermission: "read",
+      });
 
       const result = await Effect.runPromise(
-        authService.authenticate("bad-token")
+        Effect.gen(function* () {
+          const auth = yield* MimicAuthServiceTag;
+          return yield* auth.authenticate("unknown-user", "doc-1");
+        }).pipe(Effect.provide(layer))
       );
 
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error).toBe("Invalid token");
-      }
+      expect(result.userId).toBe("unknown-user");
+      expect(result.permission).toBe("read");
     });
 
-    it("should handle success without userId", async () => {
-      const authService = MimicAuthService.make((_token) => ({
-        success: true,
-      }));
+    it("should fail for unknown users without default permission", async () => {
+      const layer = MimicAuthService.Static.make({
+        permissions: {
+          "user-1": "write",
+        },
+      });
 
       const result = await Effect.runPromise(
-        authService.authenticate("token")
+        Effect.gen(function* () {
+          const auth = yield* MimicAuthServiceTag;
+          return yield* Effect.either(
+            auth.authenticate("unknown-user", "doc-1")
+          );
+        }).pipe(Effect.provide(layer))
       );
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.userId).toBeUndefined();
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect(result.left).toBeInstanceOf(AuthenticationError);
+        expect(result.left.reason).toBe("Unknown user");
       }
     });
   });
 
-  describe("makeEffect", () => {
-    it("should create auth service from Effect-based authenticate function", async () => {
-      const authService = MimicAuthService.makeEffect((token) =>
-        Effect.succeed({ success: true as const, userId: `effect-${token}` })
-      );
+  describe("make (custom)", () => {
+    it("should allow custom implementation with service access", async () => {
+      // Create a mock service
+      class MockDatabaseTag extends Context.Tag("MockDatabase")<
+        MockDatabaseTag,
+        { getPermission: (userId: string) => Effect.Effect<"read" | "write"> }
+      >() {}
 
-      const result = await Effect.runPromise(
-        authService.authenticate("effect-token")
-      );
+      const mockDbLayer = Layer.succeed(MockDatabaseTag, {
+        getPermission: (userId: string) =>
+          Effect.succeed(userId === "admin" ? "write" : "read"),
+      });
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.userId).toBe("effect-effect-token");
-      }
-    });
-
-    it("should support Effect operations in authenticate", async () => {
-      const authService = MimicAuthService.makeEffect((token) =>
+      const authLayer = MimicAuthService.make(
         Effect.gen(function* () {
-          yield* Effect.sleep(10);
-          return { success: true as const, userId: `delayed-${token}` };
+          const db = yield* MockDatabaseTag;
+
+          return {
+            authenticate: (token: string, _documentId: string) =>
+              Effect.gen(function* () {
+                const permission = yield* db.getPermission(token);
+                return { userId: token, permission };
+              }),
+          };
         })
-      );
-
-      const result = await Effect.runPromise(
-        authService.authenticate("delay-token")
-      );
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.userId).toBe("delayed-delay-token");
-      }
-    });
-  });
-
-  describe("layer", () => {
-    it("should create a layer from auth handler", async () => {
-      const testLayer = MimicAuthService.layer({
-        authHandler: (token) => ({ success: true, userId: `layer-${token}` }),
-      });
+      ).pipe(Layer.provide(mockDbLayer));
 
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const authService = yield* MimicAuthService.MimicAuthServiceTag;
-          return yield* authService.authenticate("layer-token");
-        }).pipe(Effect.provide(testLayer))
+          const auth = yield* MimicAuthServiceTag;
+          const admin = yield* auth.authenticate("admin", "doc-1");
+          const user = yield* auth.authenticate("user", "doc-1");
+          return { admin, user };
+        }).pipe(Effect.provide(authLayer))
       );
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.userId).toBe("layer-layer-token");
-      }
+      expect(result.admin.permission).toBe("write");
+      expect(result.user.permission).toBe("read");
     });
   });
 
-  describe("layerService", () => {
-    it("should create a layer from service implementation", async () => {
-      const service = MimicAuthService.make((token) => ({
-        success: true,
-        userId: `service-${token}`,
-      }));
-
-      const testLayer = MimicAuthService.layerService(service);
-
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const authService = yield* MimicAuthService.MimicAuthServiceTag;
-          return yield* authService.authenticate("service-token");
-        }).pipe(Effect.provide(testLayer))
-      );
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.userId).toBe("service-service-token");
-      }
-    });
-  });
-
-  describe("layerEffect", () => {
-    it("should create a layer from an Effect", async () => {
-      const testLayer = MimicAuthService.layerEffect(
-        Effect.succeed(
-          MimicAuthService.make((token) => ({
-            success: true,
-            userId: `effect-layer-${token}`,
-          }))
-        )
-      );
-
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const authService = yield* MimicAuthService.MimicAuthServiceTag;
-          return yield* authService.authenticate("effect-layer-token");
-        }).pipe(Effect.provide(testLayer))
-      );
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.userId).toBe("effect-layer-effect-layer-token");
-      }
-    });
-  });
-
-  describe("MimicAuthServiceTag", () => {
-    it("should have the correct tag identifier", () => {
-      expect(MimicAuthService.MimicAuthServiceTag.key).toBe(
-        "@voidhash/mimic-server-effect/MimicAuthService"
+  describe("Tag", () => {
+    it("should have correct identifier", () => {
+      expect(MimicAuthServiceTag.key).toBe(
+        "@voidhash/mimic-effect/MimicAuthService"
       );
     });
   });

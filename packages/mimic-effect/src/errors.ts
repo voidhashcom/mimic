@@ -1,113 +1,100 @@
 /**
- * @since 0.0.1
- * Error types for the Mimic server.
+ * @voidhash/mimic-effect - Error Types
+ *
+ * All error types used throughout the mimic-effect package.
  */
-import * as Data from "effect/Data";
+import { Data } from "effect";
 
 // =============================================================================
-// Error Types
+// Storage Errors
 // =============================================================================
 
 /**
- * Error when a document type is not found in the schema registry.
+ * Error when ColdStorage (snapshot storage) operations fail
  */
-export class DocumentTypeNotFoundError extends Data.TaggedError(
-  "DocumentTypeNotFoundError"
-)<{
-  readonly documentType: string;
-}> {
-  override get message(): string {
-    return `Document type not found: ${this.documentType}`;
-  }
-}
-
-/**
- * Error when a document is not found.
- */
-export class DocumentNotFoundError extends Data.TaggedError(
-  "DocumentNotFoundError"
-)<{
+export class ColdStorageError extends Data.TaggedError("ColdStorageError")<{
   readonly documentId: string;
-}> {
-  override get message(): string {
-    return `Document not found: ${this.documentId}`;
-  }
-}
+  readonly operation: "load" | "save" | "delete";
+  readonly cause: unknown;
+}> {}
 
 /**
- * Error when authentication fails.
+ * Error when HotStorage (WAL storage) operations fail
+ */
+export class HotStorageError extends Data.TaggedError("HotStorageError")<{
+  readonly documentId: string;
+  readonly operation: "append" | "getEntries" | "truncate";
+  readonly cause: unknown;
+}> {}
+
+// =============================================================================
+// Auth Errors
+// =============================================================================
+
+/**
+ * Error when authentication fails (invalid token, expired, etc.)
  */
 export class AuthenticationError extends Data.TaggedError(
   "AuthenticationError"
 )<{
   readonly reason: string;
-}> {
-  override get message(): string {
-    return `Authentication failed: ${this.reason}`;
-  }
-}
+}> {}
 
 /**
- * Error when a transaction is rejected.
+ * Error when authorization fails (user doesn't have required permission)
+ */
+export class AuthorizationError extends Data.TaggedError("AuthorizationError")<{
+  readonly reason: string;
+  readonly required: "read" | "write";
+  readonly actual: "read" | "write";
+}> {}
+
+// =============================================================================
+// Connection Errors
+// =============================================================================
+
+/**
+ * Error when document ID is missing from WebSocket request path
+ */
+export class MissingDocumentIdError extends Data.TaggedError(
+  "MissingDocumentIdError"
+)<{
+  readonly path: string;
+}> {}
+
+/**
+ * Error when WebSocket message cannot be parsed
+ */
+export class MessageParseError extends Data.TaggedError("MessageParseError")<{
+  readonly cause: unknown;
+}> {}
+
+// =============================================================================
+// Transaction Errors
+// =============================================================================
+
+/**
+ * Error when a transaction is rejected by the document
  */
 export class TransactionRejectedError extends Data.TaggedError(
   "TransactionRejectedError"
 )<{
   readonly transactionId: string;
   readonly reason: string;
-}> {
-  override get message(): string {
-    return `Transaction ${this.transactionId} rejected: ${this.reason}`;
-  }
-}
+}> {}
+
+// =============================================================================
+// Union Type
+// =============================================================================
 
 /**
- * Error when parsing a client message fails.
+ * Union of all mimic-effect errors
  */
-export class MessageParseError extends Data.TaggedError("MessageParseError")<{
-  readonly cause: unknown;
-}> {
-  override get message(): string {
-    return `Failed to parse message: ${String(this.cause)}`;
-  }
-}
-
-/**
- * Error when the WebSocket connection is invalid.
- */
-export class InvalidConnectionError extends Data.TaggedError(
-  "InvalidConnectionError"
-)<{
-  readonly reason: string;
-}> {
-  override get message(): string {
-    return `Invalid connection: ${this.reason}`;
-  }
-}
-
-/**
- * Error when the document ID is missing from the URL path.
- */
-export class MissingDocumentIdError extends Data.TaggedError(
-  "MissingDocumentIdError"
-)<{
-  readonly path?: string;
-}> {
-  override get message(): string {
-    return this.path 
-      ? `Document ID is required in the URL path: ${this.path}`
-      : "Document ID is required in the URL path";
-  }
-}
-
-/**
- * Union of all Mimic server errors.
- */
-export type MimicServerError =
-  | DocumentTypeNotFoundError
-  | DocumentNotFoundError
+export type MimicError =
+  | ColdStorageError
+  | HotStorageError
   | AuthenticationError
-  | TransactionRejectedError
+  | AuthorizationError
+  | MissingDocumentIdError
   | MessageParseError
-  | InvalidConnectionError
-  | MissingDocumentIdError;
+  | TransactionRejectedError;
