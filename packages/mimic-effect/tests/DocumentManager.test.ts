@@ -5,10 +5,10 @@ import {
   DocumentManager,
   DocumentManagerTag,
   DocumentManagerConfigTag,
-} from "../src/DocumentManager.js";
-import { ColdStorage } from "../src/ColdStorage.js";
-import { HotStorage } from "../src/HotStorage.js";
-import type { ResolvedConfig } from "../src/Types.js";
+} from "../src/DocumentManager";
+import { ColdStorage } from "../src/ColdStorage";
+import { HotStorage } from "../src/HotStorage";
+import type { ResolvedConfig } from "../src/Types";
 
 // =============================================================================
 // Test Schema
@@ -36,9 +36,6 @@ const makeTestLayer = (options?: {
       interval: Duration.minutes(5),
       transactionThreshold: 100,
     },
-    basePath: "/mimic",
-    heartbeatInterval: Duration.seconds(30),
-    heartbeatTimeout: Duration.seconds(10),
   };
 
   const configLayer = Layer.succeed(

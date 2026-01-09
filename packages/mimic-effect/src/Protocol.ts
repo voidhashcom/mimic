@@ -5,8 +5,8 @@
  */
 import { Effect } from "effect";
 import { Transaction } from "@voidhash/mimic";
-import type { Permission, PresenceEntry } from "./Types.js";
-import { MessageParseError } from "./Errors.js";
+import type { Permission, PresenceEntry } from "./Types";
+import { MessageParseError } from "./Errors";
 
 // =============================================================================
 // Client -> Server Messages

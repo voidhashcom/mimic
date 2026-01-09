@@ -4,4 +4,4 @@
  * @since 0.0.1
  */
 
-export * from "./tree-helpers.js";
+export * from "./tree-helpers";

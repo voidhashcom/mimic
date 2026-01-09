@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Layer } from "effect";
-import { ColdStorage, ColdStorageTag } from "../src/ColdStorage.js";
-import type { StoredDocument } from "../src/Types.js";
+import { ColdStorage, ColdStorageTag } from "../src/ColdStorage";
+import type { StoredDocument } from "../src/Types";
 
 describe("ColdStorage", () => {
   describe("InMemory", () => {

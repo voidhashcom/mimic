@@ -4,8 +4,8 @@
  * Authentication and authorization service interface and implementations.
  */
 import { Context, Effect, Layer } from "effect";
-import type { AuthContext, Permission } from "./Types.js";
-import { AuthenticationError } from "./Errors.js";
+import type { AuthContext, Permission } from "./Types";
+import { AuthenticationError } from "./Errors";
 
 // =============================================================================
 // MimicAuthService Interface

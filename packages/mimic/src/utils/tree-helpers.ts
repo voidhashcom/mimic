@@ -7,8 +7,8 @@
  * @since 0.0.1
  */
 
-import type { TreeNodeSnapshot, TreePrimitive } from "../primitives/Tree.js";
-import type { AnyTreeNodePrimitive } from "../primitives/TreeNode.js";
+import type { TreeNodeSnapshot, TreePrimitive } from "../primitives/Tree";
+import type { AnyTreeNodePrimitive } from "../primitives/TreeNode";
 
 // =============================================================================
 // Result Types

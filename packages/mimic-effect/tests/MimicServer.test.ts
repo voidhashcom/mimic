@@ -2,11 +2,11 @@ import { describe, it, expect } from "vitest";
 import { Effect, Layer } from "effect";
 import { Schema } from "effect";
 import { Primitive, Presence } from "@voidhash/mimic";
-import { MimicServer } from "../src/MimicServer.js";
-import { MimicServerEngine } from "../src/MimicServerEngine.js";
-import { ColdStorage } from "../src/ColdStorage.js";
-import { HotStorage } from "../src/HotStorage.js";
-import { MimicAuthService } from "../src/MimicAuthService.js";
+import { MimicServer } from "../src/MimicServer";
+import { MimicServerEngine } from "../src/MimicServerEngine";
+import { ColdStorage } from "../src/ColdStorage";
+import { HotStorage } from "../src/HotStorage";
+import { MimicAuthService } from "../src/MimicAuthService";
 
 // =============================================================================
 // Test Schema

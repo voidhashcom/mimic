@@ -3,8 +3,8 @@ import { Effect, Layer, Context } from "effect";
 import {
   MimicAuthService,
   MimicAuthServiceTag,
-} from "../src/MimicAuthService.js";
-import { AuthenticationError } from "../src/Errors.js";
+} from "../src/MimicAuthService";
+import { AuthenticationError } from "../src/Errors";
 
 describe("MimicAuthService", () => {
   describe("NoAuth", () => {

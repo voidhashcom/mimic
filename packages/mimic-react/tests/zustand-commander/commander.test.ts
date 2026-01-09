@@ -13,7 +13,7 @@ import {
   type Command,
   type CommandContext,
   type UndoableCommand,
-} from "../../src/zustand-commander/index.js";
+} from "../../src/zustand-commander/index";
 
 // =============================================================================
 // Test Store Types

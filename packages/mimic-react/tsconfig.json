@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.build.json",
-  "include": ["src", "test"],
+  "include": ["src", "tests"],
   "compilerOptions": {
     "allowJs": false,
     "strictNullChecks": true

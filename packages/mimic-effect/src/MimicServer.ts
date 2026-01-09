@@ -20,13 +20,13 @@ import {
 } from "@effect/platform";
 import type * as Socket from "@effect/platform/Socket";
 import { Presence } from "@voidhash/mimic";
-import type { MimicServerRouteConfig, ResolvedRouteConfig } from "./Types.js";
-import * as Protocol from "./Protocol.js";
-import { MissingDocumentIdError } from "./Errors.js";
-import { MimicServerEngineTag, type MimicServerEngine } from "./MimicServerEngine.js";
-import { MimicAuthServiceTag, type MimicAuthService } from "./MimicAuthService.js";
-import * as Metrics from "./Metrics.js";
-import type { AuthContext } from "./Types.js";
+import type { MimicServerRouteConfig, ResolvedRouteConfig } from "./Types";
+import * as Protocol from "./Protocol";
+import { MissingDocumentIdError } from "./Errors";
+import { MimicServerEngineTag, type MimicServerEngine } from "./MimicServerEngine";
+import { MimicAuthServiceTag, type MimicAuthService } from "./MimicAuthService";
+import * as Metrics from "./Metrics";
+import type { AuthContext } from "./Types";
 
 // =============================================================================
 // Default Configuration

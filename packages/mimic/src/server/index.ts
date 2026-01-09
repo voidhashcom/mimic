@@ -11,7 +11,7 @@
 // Server Document
 // =============================================================================
 
-export * as ServerDocument from "./ServerDocument.js";
+export * as ServerDocument from "./ServerDocument";
 
 // =============================================================================
 // Errors
@@ -24,7 +24,7 @@ export {
   StateValidationError,
   EmptyTransactionError,
   DuplicateTransactionError,
-} from "./errors.js";
+} from "./errors";
 
 // =============================================================================
 // Re-export Types (for convenience)
@@ -37,4 +37,4 @@ export type {
   SnapshotMessage,
   SubmitResult,
   ServerDocumentOptions,
-} from "./ServerDocument.js";
+} from "./ServerDocument";

@@ -4,11 +4,11 @@ import { Primitive, Presence, Document, Transaction } from "@voidhash/mimic";
 import { TestRunner } from "@effect/cluster";
 import {
   MimicClusterServerEngine,
-} from "../src/MimicClusterServerEngine.js";
-import { MimicServerEngineTag } from "../src/MimicServerEngine.js";
-import { ColdStorage } from "../src/ColdStorage.js";
-import { HotStorage } from "../src/HotStorage.js";
-import { MimicAuthService } from "../src/MimicAuthService.js";
+} from "../src/MimicClusterServerEngine";
+import { MimicServerEngineTag } from "../src/MimicServerEngine";
+import { ColdStorage } from "../src/ColdStorage";
+import { HotStorage } from "../src/HotStorage";
+import { MimicAuthService } from "../src/MimicAuthService";
 
 // =============================================================================
 // Test Schema

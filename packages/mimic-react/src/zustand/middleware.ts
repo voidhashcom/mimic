@@ -5,7 +5,7 @@ import type {
   MimicSlice,
   MimicObject,
   MimicMiddlewareOptions,
-} from "./types.js";
+} from "./types";
 
 // =============================================================================
 // Middleware Implementation

@@ -16,7 +16,7 @@ import {
   type CommandDispatch,
   type CommanderSlice,
   type ExtractState,
-} from "./types.js";
+} from "./types";
 
 // =============================================================================
 // useCommander Hook

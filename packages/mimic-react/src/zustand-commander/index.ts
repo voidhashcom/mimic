@@ -80,7 +80,7 @@ export {
   performUndo,
   performRedo,
   clearUndoHistory,
-} from "./commander.js";
+} from "./commander";
 
 // =============================================================================
 // Hooks
@@ -92,7 +92,7 @@ export {
   useUndoRedoKeyboard,
   type UndoRedoState,
   type UseUndoRedoKeyboardOptions,
-} from "./hooks.js";
+} from "./hooks";
 
 // =============================================================================
 // Types
@@ -121,7 +121,7 @@ export type {
   CommandReturn,
   CommandStore,
   ExtractState,
-} from "./types.js";
+} from "./types";
 
 // =============================================================================
 // Symbols & Type Guards
@@ -132,5 +132,5 @@ export {
   UNDOABLE_COMMAND_SYMBOL,
   isCommand,
   isUndoableCommand,
-} from "./types.js";
+} from "./types";
 

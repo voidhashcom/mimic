@@ -11,37 +11,37 @@
 // Presence (re-exported from core for convenience)
 // =============================================================================
 
-export * as Presence from "../Presence.js";
+export * as Presence from "../Presence";
 
 // =============================================================================
 // Main Client Document
 // =============================================================================
 
-export * as ClientDocument from "./ClientDocument.js";
+export * as ClientDocument from "./ClientDocument";
 
 // =============================================================================
 // Transport Interface
 // =============================================================================
 
-export * as Transport from "./Transport.js";
+export * as Transport from "./Transport";
 
 // =============================================================================
 // WebSocket Transport
 // =============================================================================
 
-export * as WebSocketTransport from "./WebSocketTransport.js";
+export * as WebSocketTransport from "./WebSocketTransport";
 
 // =============================================================================
 // Rebase Logic
 // =============================================================================
 
-export * as Rebase from "./Rebase.js";
+export * as Rebase from "./Rebase";
 
 // =============================================================================
 // State Monitoring
 // =============================================================================
 
-export * as StateMonitor from "./StateMonitor.js";
+export * as StateMonitor from "./StateMonitor";
 
 // =============================================================================
 // Errors
@@ -58,4 +58,4 @@ export {
   InvalidStateError,
   WebSocketError,
   AuthenticationError,
-} from "./errors.js";
+} from "./errors";

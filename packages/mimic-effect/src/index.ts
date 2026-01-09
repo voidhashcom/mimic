@@ -10,13 +10,13 @@
 // Main Exports
 // =============================================================================
 
-export { MimicServerEngine, MimicServerEngineTag } from "./MimicServerEngine.js";
-export { MimicClusterServerEngine } from "./MimicClusterServerEngine.js";
-export { MimicServer, type MimicServerRouteConfig } from "./MimicServer.js";
-export { ColdStorage, ColdStorageTag } from "./ColdStorage.js";
-export { HotStorage, HotStorageTag } from "./HotStorage.js";
-export { MimicAuthService, MimicAuthServiceTag } from "./MimicAuthService.js";
-export { MimicMetrics } from "./Metrics.js";
+export { MimicServerEngine, MimicServerEngineTag } from "./MimicServerEngine";
+export { MimicClusterServerEngine } from "./MimicClusterServerEngine";
+export { MimicServer, type MimicServerRouteConfig } from "./MimicServer";
+export { ColdStorage, ColdStorageTag } from "./ColdStorage";
+export { HotStorage, HotStorageTag } from "./HotStorage";
+export { MimicAuthService, MimicAuthServiceTag } from "./MimicAuthService";
+export { MimicMetrics } from "./Metrics";
 
 // =============================================================================
 // Types
@@ -42,7 +42,7 @@ export type {
   ResolvedConfig,
   ResolvedClusterConfig,
   ResolvedRouteConfig,
-} from "./Types.js";
+} from "./Types";
 
 // =============================================================================
 // Errors
@@ -57,13 +57,13 @@ export {
   MessageParseError,
   TransactionRejectedError,
   type MimicError,
-} from "./Errors.js";
+} from "./Errors";
 
 // =============================================================================
 // Protocol (for custom implementations)
 // =============================================================================
 
-export * as Protocol from "./Protocol.js";
+export * as Protocol from "./Protocol";
 
 // =============================================================================
 // Internal Exports (for advanced use cases)
@@ -74,9 +74,9 @@ export {
   DocumentManagerTag,
   DocumentManagerConfigTag,
   type SubmitResult,
-} from "./DocumentManager.js";
+} from "./DocumentManager";
 
 export {
   PresenceManager,
   PresenceManagerTag,
-} from "./PresenceManager.js";
+} from "./PresenceManager";

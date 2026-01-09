@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect } from "effect";
-import * as Protocol from "../src/Protocol.js";
+import * as Protocol from "../src/Protocol";
 import { Transaction, Document, Primitive } from "@voidhash/mimic";
 
 describe("Protocol", () => {

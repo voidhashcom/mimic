@@ -21,7 +21,7 @@ import {
   type RevertFn,
   type UndoableCommand,
   type UndoEntry,
-} from "./types.js";
+} from "./types";
 
 // =============================================================================
 // Default Options

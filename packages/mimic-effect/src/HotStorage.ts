@@ -4,8 +4,8 @@
  * Interface and implementations for Write-Ahead Log (WAL) storage.
  */
 import { Context, Effect, HashMap, Layer, Ref } from "effect";
-import type { WalEntry } from "./Types.js";
-import { HotStorageError } from "./Errors.js";
+import type { WalEntry } from "./Types";
+import { HotStorageError } from "./Errors";
 
 // =============================================================================
 // HotStorage Interface

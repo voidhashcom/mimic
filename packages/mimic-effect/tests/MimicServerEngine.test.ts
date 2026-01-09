@@ -5,11 +5,11 @@ import { Primitive, Presence, Document, Transaction } from "@voidhash/mimic";
 import {
   MimicServerEngine,
   MimicServerEngineTag,
-} from "../src/MimicServerEngine.js";
-import { ColdStorage } from "../src/ColdStorage.js";
-import { HotStorage } from "../src/HotStorage.js";
-import { MimicAuthService } from "../src/MimicAuthService.js";
-import * as Protocol from "../src/Protocol.js";
+} from "../src/MimicServerEngine";
+import { ColdStorage } from "../src/ColdStorage";
+import { HotStorage } from "../src/HotStorage";
+import { MimicAuthService } from "../src/MimicAuthService";
+import * as Protocol from "../src/Protocol";
 
 // =============================================================================
 // Test Schema

@@ -4,8 +4,8 @@
  * Interface and implementations for document snapshot storage.
  */
 import { Context, Effect, HashMap, Layer, Ref } from "effect";
-import type { StoredDocument } from "./Types.js";
-import { ColdStorageError } from "./Errors.js";
+import type { StoredDocument } from "./Types";
+import { ColdStorageError } from "./Errors";
 
 // =============================================================================
 // ColdStorage Interface

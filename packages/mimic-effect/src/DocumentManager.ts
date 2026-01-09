@@ -29,11 +29,11 @@ import type {
   ResolvedConfig,
   StoredDocument,
   WalEntry,
-} from "./Types.js";
-import type { SnapshotMessage, ServerBroadcast } from "./Protocol.js";
-import { ColdStorageTag, type ColdStorage } from "./ColdStorage.js";
-import { HotStorageTag, type HotStorage } from "./HotStorage.js";
-import * as Metrics from "./Metrics.js";
+} from "./Types";
+import type { SnapshotMessage, ServerBroadcast } from "./Protocol";
+import { ColdStorageTag, type ColdStorage } from "./ColdStorage";
+import { HotStorageTag, type HotStorage } from "./HotStorage";
+import * as Metrics from "./Metrics";
 
 // =============================================================================
 // Submit Result Types

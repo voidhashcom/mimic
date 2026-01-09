@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk, Fiber } from "effect";
-import { PresenceManager, PresenceManagerTag } from "../src/PresenceManager.js";
+import { PresenceManager, PresenceManagerTag } from "../src/PresenceManager";
 
 describe("PresenceManager", () => {
   describe("getSnapshot", () => {

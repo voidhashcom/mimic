@@ -40,7 +40,7 @@ export type {
 
   // Validator type
   Validator,
-} from "../primitives/shared.js";
+} from "../primitives/shared";
 
 // =============================================================================
 // Struct Inference Types
@@ -52,7 +52,7 @@ export type {
   StructSetInput,
   StructUpdateValue,
   StructProxy,
-} from "../primitives/Struct.js";
+} from "../primitives/Struct";
 
 // =============================================================================
 // Array Inference Types
@@ -67,7 +67,7 @@ export type {
   ArrayUpdateInput,
   ArrayElementSetInput,
   ArrayProxy,
-} from "../primitives/Array.js";
+} from "../primitives/Array";
 
 // =============================================================================
 // Tree Inference Types
@@ -86,7 +86,7 @@ export type {
   TreeProxy,
   TypedNodeProxy,
   TreeNodeProxyBase,
-} from "../primitives/Tree.js";
+} from "../primitives/Tree";
 
 // =============================================================================
 // TreeNode Inference Types
@@ -100,9 +100,9 @@ export type {
   TreeNodeSelfType,
   TreeNodeConfig,
   TreeNodeChildrenInput,
-} from "../primitives/TreeNode.js";
+} from "../primitives/TreeNode";
 
-export { TreeNodePrimitive, TreeNodeSelf } from "../primitives/TreeNode.js";
+export { TreeNodePrimitive, TreeNodeSelf } from "../primitives/TreeNode";
 
 // =============================================================================
 // Union Inference Types
@@ -112,7 +112,7 @@ export type {
   InferUnionState,
   InferUnionSnapshot,
   UnionVariants,
-} from "../primitives/Union.js";
+} from "../primitives/Union";
 
 // =============================================================================
 // Either Inference Types
@@ -122,7 +122,7 @@ export type {
   InferEitherState,
   InferEitherSnapshot,
   ScalarPrimitive,
-} from "../primitives/Either.js";
+} from "../primitives/Either";
 
 // =============================================================================
 // Lazy Inference Types
@@ -134,4 +134,4 @@ export type {
   InferLazySnapshot,
   InferLazySetInput,
   InferLazyUpdateInput,
-} from "../primitives/Lazy.js";
+} from "../primitives/Lazy";

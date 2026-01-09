@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Effect } from "effect";
-import { HotStorage, HotStorageTag } from "../src/HotStorage.js";
-import type { WalEntry } from "../src/Types.js";
+import { HotStorage, HotStorageTag } from "../src/HotStorage";
+import type { WalEntry } from "../src/Types";
 import { Transaction } from "@voidhash/mimic";
 
 describe("HotStorage", () => {

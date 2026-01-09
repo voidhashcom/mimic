@@ -18,8 +18,8 @@ import type {
   PresenceEntry,
   PresenceEvent,
   PresenceSnapshot,
-} from "./Types.js";
-import * as Metrics from "./Metrics.js";
+} from "./Types";
+import * as Metrics from "./Metrics";
 
 // =============================================================================
 // PresenceManager Interface

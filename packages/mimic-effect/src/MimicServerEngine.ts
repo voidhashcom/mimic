@@ -21,21 +21,21 @@ import type {
   PresenceEvent,
   PresenceSnapshot,
   ResolvedConfig,
-} from "./Types.js";
-import type * as Protocol from "./Protocol.js";
-import { ColdStorageTag } from "./ColdStorage.js";
-import { HotStorageTag } from "./HotStorage.js";
-import { MimicAuthServiceTag } from "./MimicAuthService.js";
+} from "./Types";
+import type * as Protocol from "./Protocol";
+import { ColdStorageTag } from "./ColdStorage";
+import { HotStorageTag } from "./HotStorage";
+import { MimicAuthServiceTag } from "./MimicAuthService";
 import {
   DocumentManagerTag,
   DocumentManagerConfigTag,
   layer as documentManagerLayer,
   type SubmitResult,
-} from "./DocumentManager.js";
+} from "./DocumentManager";
 import {
   PresenceManagerTag,
   layer as presenceManagerLayer,
-} from "./PresenceManager.js";
+} from "./PresenceManager";
 
 // =============================================================================
 // MimicServerEngine Interface

@@ -10,7 +10,7 @@
 // Middleware
 // =============================================================================
 
-export { mimic } from "./middleware.js";
+export { mimic } from "./middleware";
 
 // =============================================================================
 // Types
@@ -21,4 +21,4 @@ export type {
   MimicSlice,
   MimicMiddlewareOptions,
   MimicStateCreator,
-} from "./types.js";
+} from "./types";

@@ -32,14 +32,14 @@ import type {
   ResolvedClusterConfig,
   StoredDocument,
   WalEntry,
-} from "./Types.js";
-import type * as Protocol from "./Protocol.js";
-import { ColdStorageTag, type ColdStorage } from "./ColdStorage.js";
-import { HotStorageTag, type HotStorage } from "./HotStorage.js";
-import { MimicAuthServiceTag } from "./MimicAuthService.js";
-import { MimicServerEngineTag, type MimicServerEngine } from "./MimicServerEngine.js";
-import type { SubmitResult } from "./DocumentManager.js";
-import * as Metrics from "./Metrics.js";
+} from "./Types";
+import type * as Protocol from "./Protocol";
+import { ColdStorageTag, type ColdStorage } from "./ColdStorage";
+import { HotStorageTag, type HotStorage } from "./HotStorage";
+import { MimicAuthServiceTag } from "./MimicAuthService";
+import { MimicServerEngineTag, type MimicServerEngine } from "./MimicServerEngine";
+import type { SubmitResult } from "./DocumentManager";
+import * as Metrics from "./Metrics";
 
 // =============================================================================
 // Default Configuration
