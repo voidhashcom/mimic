@@ -10,11 +10,15 @@ import {
   Context,
   Duration,
   Effect,
+  HashMap,
   Layer,
+  Metric,
+  Ref,
+  Schedule,
   Scope,
   Stream,
 } from "effect";
-import type { Presence, Primitive, Transaction } from "@voidhash/mimic";
+import type { Primitive, Transaction } from "@voidhash/mimic";
 import type {
   MimicServerEngineConfig,
   PresenceEntry,
@@ -27,16 +31,25 @@ import { ColdStorageTag } from "./ColdStorage";
 import { HotStorageTag } from "./HotStorage";
 import { MimicAuthServiceTag } from "./MimicAuthService";
 import {
-  DocumentManagerTag,
-  DocumentManagerConfigTag,
-  layer as documentManagerLayer,
+  DocumentInstance,
   type SubmitResult,
-  type DocumentManagerError,
-} from "./DocumentManager";
+  type DocumentInstance as DocumentInstanceType,
+} from "./DocumentInstance";
 import {
   PresenceManagerTag,
   layer as presenceManagerLayer,
 } from "./PresenceManager";
+import * as Metrics from "./Metrics";
+import type { ColdStorageError, HotStorageError } from "./Errors";
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Error type for MimicServerEngine operations
+ */
+export type MimicServerEngineError = ColdStorageError | HotStorageError;
 
 // =============================================================================
 // MimicServerEngine Interface
@@ -52,30 +65,30 @@ export interface MimicServerEngine {
   /**
    * Submit a transaction to a document.
    * Authorization is checked against the auth service.
-   * May fail with DocumentManagerError if storage is unavailable.
+   * May fail with MimicServerEngineError if storage is unavailable.
    */
   readonly submit: (
     documentId: string,
     transaction: Transaction.Transaction
-  ) => Effect.Effect<SubmitResult, DocumentManagerError>;
+  ) => Effect.Effect<SubmitResult, MimicServerEngineError>;
 
   /**
    * Get document snapshot (current state and version).
-   * May fail with DocumentManagerError if storage is unavailable.
+   * May fail with MimicServerEngineError if storage is unavailable.
    */
   readonly getSnapshot: (
     documentId: string
-  ) => Effect.Effect<{ state: unknown; version: number }, DocumentManagerError>;
+  ) => Effect.Effect<{ state: unknown; version: number }, MimicServerEngineError>;
 
   /**
    * Subscribe to document broadcasts (transactions).
    * Returns a stream of server messages.
    * Requires a Scope for cleanup when the subscription ends.
-   * May fail with DocumentManagerError if storage is unavailable.
+   * May fail with MimicServerEngineError if storage is unavailable.
    */
   readonly subscribe: (
     documentId: string
-  ) => Effect.Effect<Stream.Stream<Protocol.ServerMessage, never, never>, DocumentManagerError, Scope.Scope>;
+  ) => Effect.Effect<Stream.Stream<Protocol.ServerMessage, never, never>, MimicServerEngineError, Scope.Scope>;
 
   /**
    * Touch document to prevent idle garbage collection.
@@ -165,6 +178,18 @@ const resolveConfig = <TSchema extends Primitive.AnyPrimitive>(
 });
 
 // =============================================================================
+// Internal Types
+// =============================================================================
+
+/**
+ * Store entry for a document instance with last activity time
+ */
+interface StoreEntry<TSchema extends Primitive.AnyPrimitive> {
+  readonly instance: DocumentInstanceType<TSchema>;
+  readonly lastActivityTime: Ref.Ref<number>;
+}
+
+// =============================================================================
 // Factory
 // =============================================================================
 
@@ -208,37 +233,148 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 > => {
   const resolvedConfig = resolveConfig(config);
 
-  // Create config layer for DocumentManager
-  const configLayer = Layer.succeed(
-    DocumentManagerConfigTag,
-    resolvedConfig as ResolvedConfig<Primitive.AnyPrimitive>
-  );
-
-  // Create internal layers
-  const internalLayers = Layer.mergeAll(
-    documentManagerLayer.pipe(Layer.provide(configLayer)),
-    presenceManagerLayer
-  );
-
   return Layer.scoped(
     MimicServerEngineTag,
-    Effect.fn("mimic-server-engine.make")(function* () {
-      const documentManager = yield* DocumentManagerTag;
+    Effect.gen(function* () {
+      const coldStorage = yield* ColdStorageTag;
+      const hotStorage = yield* HotStorageTag;
       const presenceManager = yield* PresenceManagerTag;
+
+      // Store: documentId -> StoreEntry
+      const store = yield* Ref.make(
+        HashMap.empty<string, StoreEntry<TSchema>>()
+      );
+
+      /**
+       * Get or create a document instance
+       */
+      const getOrCreateDocument = Effect.fn("engine.document.get-or-create")(
+        function* (documentId: string) {
+          const current = yield* Ref.get(store);
+          const existing = HashMap.get(current, documentId);
+
+          if (existing._tag === "Some") {
+            // Update activity time
+            yield* Ref.set(existing.value.lastActivityTime, Date.now());
+            return existing.value.instance;
+          }
+
+          // Create new document instance
+          const instance = yield* DocumentInstance.make(
+            documentId,
+            {
+              schema: config.schema,
+              initial: config.initial,
+              maxTransactionHistory: resolvedConfig.maxTransactionHistory,
+              snapshot: resolvedConfig.snapshot,
+            },
+            coldStorage,
+            hotStorage
+          );
+
+          const lastActivityTime = yield* Ref.make(Date.now());
+
+          // Store it
+          yield* Ref.update(store, (map) =>
+            HashMap.set(map, documentId, { instance, lastActivityTime })
+          );
+
+          return instance;
+        }
+      );
+
+      /**
+       * Start background GC fiber
+       */
+      const startGCFiber = Effect.fn("engine.gc.start")(function* () {
+        const gcLoop = Effect.fn("engine.gc.loop")(function* () {
+          const current = yield* Ref.get(store);
+          const now = Date.now();
+          const maxIdleMs = Duration.toMillis(resolvedConfig.maxIdleTime);
+
+          for (const [documentId, entry] of current) {
+            const lastActivity = yield* Ref.get(entry.lastActivityTime);
+            if (now - lastActivity >= maxIdleMs) {
+              // Save final snapshot before eviction (best effort)
+              yield* Effect.catchAll(entry.instance.saveSnapshot(), (e) =>
+                Effect.logError("Failed to save snapshot during eviction", {
+                  documentId,
+                  error: e,
+                })
+              );
+
+              // Remove from store
+              yield* Ref.update(store, (map) => HashMap.remove(map, documentId));
+
+              // Track eviction metrics
+              yield* Metric.increment(Metrics.documentsEvicted);
+              yield* Metric.incrementBy(Metrics.documentsActive, -1);
+
+              yield* Effect.logInfo("Document evicted due to idle timeout", {
+                documentId,
+              });
+            }
+          }
+        });
+
+        // Run GC every minute
+        yield* gcLoop().pipe(
+          Effect.repeat(Schedule.spaced("1 minute")),
+          Effect.fork
+        );
+      });
+
+      // Start GC fiber
+      yield* startGCFiber();
+
+      // Cleanup on shutdown
+      yield* Effect.addFinalizer(() =>
+        Effect.fn("engine.shutdown")(function* () {
+          const current = yield* Ref.get(store);
+          for (const [documentId, entry] of current) {
+            // Best effort save - don't fail shutdown if storage is unavailable
+            yield* Effect.catchAll(entry.instance.saveSnapshot(), (e) =>
+              Effect.logError("Failed to save snapshot during shutdown", {
+                documentId,
+                error: e,
+              })
+            );
+          }
+          yield* Effect.logInfo("MimicServerEngine shutdown complete");
+        })()
+      );
 
       const engine: MimicServerEngine = {
         submit: (documentId, transaction) =>
-          documentManager.submit(documentId, transaction),
+          Effect.gen(function* () {
+            const instance = yield* getOrCreateDocument(documentId);
+            return yield* instance.submit(transaction);
+          }),
 
-        getSnapshot: (documentId) => documentManager.getSnapshot(documentId),
+        getSnapshot: (documentId) =>
+          Effect.gen(function* () {
+            const instance = yield* getOrCreateDocument(documentId);
+            return instance.getSnapshot();
+          }),
 
         subscribe: (documentId) =>
-          documentManager.subscribe(documentId) as Effect.Effect<
-            Stream.Stream<Protocol.ServerMessage, never, never>,
-            never
-          >,
+          Effect.gen(function* () {
+            const instance = yield* getOrCreateDocument(documentId);
+            return Stream.fromPubSub(instance.pubsub) as Stream.Stream<
+              Protocol.ServerMessage,
+              never,
+              never
+            >;
+          }),
 
-        touch: (documentId) => documentManager.touch(documentId),
+        touch: (documentId) =>
+          Effect.gen(function* () {
+            const current = yield* Ref.get(store);
+            const existing = HashMap.get(current, documentId);
+            if (existing._tag === "Some") {
+              yield* Ref.set(existing.value.lastActivityTime, Date.now());
+            }
+          }),
 
         getPresenceSnapshot: (documentId) =>
           presenceManager.getSnapshot(documentId),
@@ -256,8 +392,8 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       };
 
       return engine;
-    })()
-  ).pipe(Layer.provide(internalLayers));
+    })
+  ).pipe(Layer.provide(presenceManagerLayer));
 };
 
 // =============================================================================

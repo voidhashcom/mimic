@@ -41,11 +41,10 @@ export * as Protocol from "./Protocol";
 // =============================================================================
 
 export {
-  DocumentManager,
-  DocumentManagerTag,
-  DocumentManagerConfigTag,
+  DocumentInstance,
+  type DocumentInstance as DocumentInstanceInterface,
   type SubmitResult,
-} from "./DocumentManager";
+} from "./DocumentInstance";
 
 export {
   PresenceManager,

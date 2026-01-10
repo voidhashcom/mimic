@@ -13,32 +13,29 @@ import {
   HashMap,
   Layer,
   Metric,
-  Option,
   PubSub,
   Ref,
   Schema,
-  Scope,
   Stream,
 } from "effect";
 import { Entity, Sharding } from "@effect/cluster";
 import { Rpc } from "@effect/rpc";
-import { Document, type Presence, type Primitive, type Transaction } from "@voidhash/mimic";
-import { ServerDocument } from "@voidhash/mimic/server";
+import { type Primitive, type Transaction } from "@voidhash/mimic";
 import type {
   MimicClusterServerEngineConfig,
   PresenceEntry,
   PresenceEvent,
-  PresenceSnapshot,
   ResolvedClusterConfig,
-  StoredDocument,
-  WalEntry,
 } from "./Types";
 import type * as Protocol from "./Protocol";
 import { ColdStorageTag, type ColdStorage } from "./ColdStorage";
 import { HotStorageTag, type HotStorage } from "./HotStorage";
 import { MimicAuthServiceTag } from "./MimicAuthService";
 import { MimicServerEngineTag, type MimicServerEngine } from "./MimicServerEngine";
-import type { SubmitResult } from "./DocumentManager";
+import {
+  DocumentInstance,
+  type DocumentInstance as DocumentInstanceInterface,
+} from "./DocumentInstance";
 import * as Metrics from "./Metrics";
 
 // =============================================================================
@@ -172,16 +169,12 @@ const MimicDocumentEntity = Entity.make("MimicDocument", [
 // =============================================================================
 
 /**
- * Document state managed by the entity
+ * Entity state that wraps DocumentInstance and adds presence management
  */
-interface EntityDocumentState<TSchema extends Primitive.AnyPrimitive> {
-  readonly document: ServerDocument.ServerDocument<TSchema>;
-  readonly broadcastPubSub: PubSub.PubSub<Protocol.ServerMessage>;
+interface EntityState<TSchema extends Primitive.AnyPrimitive> {
+  readonly instance: DocumentInstanceInterface<TSchema>;
   readonly presences: HashMap.HashMap<string, PresenceEntry>;
   readonly presencePubSub: PubSub.PubSub<PresenceEvent>;
-  readonly lastSnapshotVersion: number;
-  readonly lastSnapshotTime: number;
-  readonly transactionsSinceSnapshot: number;
 }
 
 // =============================================================================
@@ -262,283 +255,37 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
     const address = yield* Entity.CurrentAddress;
     const documentId = address.entityId;
 
-    // Current schema version (hard-coded to 1 for now)
-    const SCHEMA_VERSION = 1;
+    // Create DocumentInstance (fatal if unavailable - entity cannot start)
+    const instance = yield* DocumentInstance.make(
+      documentId,
+      {
+        schema: config.schema,
+        initial: config.initial,
+        maxTransactionHistory: config.maxTransactionHistory,
+        snapshot: config.snapshot,
+      },
+      coldStorage,
+      hotStorage
+    ).pipe(Effect.orDie);
 
-    // Compute initial state
-    const computeInitialState = (): Effect.Effect<
-      Primitive.InferSetInput<TSchema> | undefined
-    > => {
-      if (config.initial === undefined) {
-        return Effect.succeed(undefined);
-      }
-
-      if (typeof config.initial === "function") {
-        return (
-          config.initial as (ctx: {
-            documentId: string;
-          }) => Effect.Effect<Primitive.InferSetInput<TSchema>>
-        )({ documentId });
-      }
-
-      return Effect.succeed(
-        config.initial as Primitive.InferSetInput<TSchema>
-      );
-    };
-
-    // Load snapshot from ColdStorage (fatal if unavailable - entity cannot start)
-    const storedDoc = yield* coldStorage.load(documentId).pipe(
-      Effect.orDie  // Entity cannot initialize without storage
-    );
-
-    let initialState: Primitive.InferSetInput<TSchema> | undefined;
-    let initialVersion = 0;
-
-    if (storedDoc) {
-      initialState =
-        storedDoc.state as Primitive.InferSetInput<TSchema>;
-      initialVersion = storedDoc.version;
-    } else {
-      initialState = yield* computeInitialState();
-    }
-
-    // Create PubSubs for broadcasting
-    const broadcastPubSub = yield* PubSub.unbounded<Protocol.ServerMessage>();
+    // Create presence PubSub and state ref
     const presencePubSub = yield* PubSub.unbounded<PresenceEvent>();
-
-    // Create state ref
-    const stateRef = yield* Ref.make<EntityDocumentState<TSchema>>({
-      document: undefined as unknown as ServerDocument.ServerDocument<TSchema>,
-      broadcastPubSub,
+    const stateRef = yield* Ref.make<EntityState<TSchema>>({
+      instance,
       presences: HashMap.empty(),
       presencePubSub,
-      lastSnapshotVersion: initialVersion,
-      lastSnapshotTime: Date.now(),
-      transactionsSinceSnapshot: 0,
-    });
-
-    // Create ServerDocument with callbacks
-    const document = ServerDocument.make({
-      schema: config.schema,
-      initialState,
-      initialVersion,
-      maxTransactionHistory: config.maxTransactionHistory,
-      onBroadcast: (message: ServerDocument.TransactionMessage) => {
-        Effect.runSync(
-          PubSub.publish(broadcastPubSub, {
-            type: "transaction",
-            transaction: message.transaction,
-            version: message.version,
-          } as Protocol.ServerMessage)
-        );
-      },
-      onRejection: (transactionId: string, reason: string) => {
-        Effect.runSync(
-          PubSub.publish(broadcastPubSub, {
-            type: "error",
-            transactionId,
-            reason,
-          } as Protocol.ServerMessage)
-        );
-      },
-    });
-
-    // Update state with document
-    yield* Ref.update(stateRef, (s) => ({ ...s, document }));
-
-    // Load WAL entries (fatal if unavailable - entity cannot start)
-    const walEntries = yield* hotStorage.getEntries(documentId, initialVersion).pipe(
-      Effect.orDie  // Entity cannot initialize without storage
-    );
-
-    // Verify WAL continuity (warning only, non-blocking)
-    if (walEntries.length > 0) {
-      const firstWalVersion = walEntries[0]!.version;
-      const expectedFirst = initialVersion + 1;
-
-      if (firstWalVersion !== expectedFirst) {
-        yield* Effect.logWarning("WAL version gap detected", {
-          documentId,
-          snapshotVersion: initialVersion,
-          firstWalVersion,
-          expectedFirst,
-        });
-        yield* Metric.increment(Metrics.storageVersionGaps);
-      }
-
-      // Check internal gaps
-      for (let i = 1; i < walEntries.length; i++) {
-        const prev = walEntries[i - 1]!.version;
-        const curr = walEntries[i]!.version;
-        if (curr !== prev + 1) {
-          yield* Effect.logWarning("WAL internal gap detected", {
-            documentId,
-            previousVersion: prev,
-            currentVersion: curr,
-          });
-        }
-      }
-    }
-
-    // Replay WAL entries
-    for (const entry of walEntries) {
-      const result = document.submit(entry.transaction);
-      if (!result.success) {
-        yield* Effect.logWarning("Skipping corrupted WAL entry", {
-          documentId,
-          version: entry.version,
-          reason: result.reason,
-        });
-      }
-    }
-
-    // Track metrics
-    if (storedDoc) {
-      yield* Metric.increment(Metrics.documentsRestored);
-    } else {
-      yield* Metric.increment(Metrics.documentsCreated);
-    }
-    yield* Metric.incrementBy(Metrics.documentsActive, 1);
-
-    /**
-     * Save snapshot to ColdStorage derived from WAL entries.
-     * This ensures snapshots are always based on durable WAL data.
-     * Idempotent: skips save if already snapshotted at target version.
-     * Truncate failures are non-fatal and will be retried on next snapshot.
-     */
-    const saveSnapshot = Effect.fn("cluster.document.snapshot.save")(
-      function* (targetVersion: number) {
-      const state = yield* Ref.get(stateRef);
-
-      // Idempotency check: skip if already snapshotted at this version
-      if (targetVersion <= state.lastSnapshotVersion) {
-        return;
-      }
-
-      const snapshotStartTime = Date.now();
-
-      // Load base snapshot from cold storage (best effort - log error but don't crash entity)
-      const baseSnapshotResult = yield* Effect.either(coldStorage.load(documentId));
-      if (baseSnapshotResult._tag === "Left") {
-        yield* Effect.logError("Failed to load base snapshot for WAL replay", {
-          documentId,
-          error: baseSnapshotResult.left,
-        });
-        return;
-      }
-      const baseSnapshot = baseSnapshotResult.right;
-      const baseVersion = baseSnapshot?.version ?? 0;
-      const baseState = baseSnapshot?.state as Primitive.InferState<TSchema> | undefined;
-
-      // Load WAL entries from base to target
-      const walEntriesResult = yield* Effect.either(hotStorage.getEntries(documentId, baseVersion));
-      if (walEntriesResult._tag === "Left") {
-        yield* Effect.logError("Failed to load WAL entries for snapshot", {
-          documentId,
-          error: walEntriesResult.left,
-        });
-        return;
-      }
-      const walEntries = walEntriesResult.right;
-      const relevantEntries = walEntries.filter(e => e.version <= targetVersion);
-
-      if (relevantEntries.length === 0 && !baseSnapshot) {
-        // Nothing to snapshot
-        return;
-      }
-
-      // Rebuild state by replaying WAL on base
-      let snapshotState: Primitive.InferState<TSchema> | undefined = baseState;
-      for (const entry of relevantEntries) {
-        // Create a temporary document to apply the transaction
-        const tempDoc = Document.make(config.schema, { initialState: snapshotState });
-        tempDoc.apply(entry.transaction.ops);
-        snapshotState = tempDoc.get();
-      }
-
-      if (snapshotState === undefined) {
-        return;
-      }
-
-      const snapshotVersion = relevantEntries.length > 0
-        ? relevantEntries[relevantEntries.length - 1]!.version
-        : baseVersion;
-
-      // Re-check before saving (in case another snapshot completed while we were working)
-      // This prevents a slower snapshot from overwriting a more recent one
-      const currentState = yield* Ref.get(stateRef);
-      if (snapshotVersion <= currentState.lastSnapshotVersion) {
-        return;
-      }
-
-      const storedDocument: StoredDocument = {
-        state: snapshotState,
-        version: snapshotVersion,
-        schemaVersion: SCHEMA_VERSION,
-        savedAt: Date.now(),
-      };
-
-      // Save to ColdStorage (best effort - log error but don't crash entity)
-      yield* Effect.catchAll(
-        coldStorage.save(documentId, storedDocument),
-        (e) =>
-          Effect.logError("Failed to save snapshot", { documentId, error: e })
-      );
-
-      const snapshotDuration = Date.now() - snapshotStartTime;
-      yield* Metric.increment(Metrics.storageSnapshots);
-      yield* Metric.update(Metrics.storageSnapshotLatency, snapshotDuration);
-
-      // Update tracking BEFORE truncate (for idempotency on retry)
-      yield* Ref.update(stateRef, (s) => ({
-        ...s,
-        lastSnapshotVersion: snapshotVersion,
-        lastSnapshotTime: Date.now(),
-        transactionsSinceSnapshot: 0,
-      }));
-
-      // Truncate WAL - non-fatal, will be retried on next snapshot
-      yield* Effect.catchAll(hotStorage.truncate(documentId, snapshotVersion), (e) =>
-        Effect.logWarning("WAL truncate failed - will retry on next snapshot", {
-          documentId,
-          version: snapshotVersion,
-          error: e,
-        })
-      );
-      }
-    );
-
-    /**
-     * Check if snapshot should be triggered
-     */
-    const checkSnapshotTriggers = Effect.fn(
-      "cluster.document.snapshot.check-triggers"
-    )(function* () {
-      const state = yield* Ref.get(stateRef);
-      const now = Date.now();
-      const currentVersion = state.document.getVersion();
-
-      const intervalMs = Duration.toMillis(config.snapshot.interval);
-      const threshold = config.snapshot.transactionThreshold;
-
-      if (state.transactionsSinceSnapshot >= threshold) {
-        yield* saveSnapshot(currentVersion);
-        return;
-      }
-
-      if (now - state.lastSnapshotTime >= intervalMs) {
-        yield* saveSnapshot(currentVersion);
-        return;
-      }
     });
 
     // Cleanup on entity finalization
     yield* Effect.addFinalizer(() =>
       Effect.fn("cluster.entity.finalize")(function* () {
-        // Save final snapshot before entity is garbage collected
-        const state = yield* Ref.get(stateRef);
-        const currentVersion = state.document.getVersion();
-        yield* saveSnapshot(currentVersion);
+        // Best effort save - don't fail shutdown if storage is unavailable
+        yield* Effect.catchAll(instance.saveSnapshot(), (e) =>
+          Effect.logError("Failed to save snapshot during entity finalization", {
+            documentId,
+            error: e,
+          })
+        );
         yield* Metric.incrementBy(Metrics.documentsActive, -1);
         yield* Metric.increment(Metrics.documentsEvicted);
         yield* Effect.logDebug("Entity finalized", { documentId });
@@ -550,90 +297,26 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
       Submit: Effect.fn("cluster.document.transaction.submit")(function* ({
         payload,
       }) {
-        const submitStartTime = Date.now();
-        const state = yield* Ref.get(stateRef);
-
         // Decode transaction
         const transaction = decodeTransaction(payload.transaction);
 
-        // Phase 1: Validate (no side effects)
-        const validation = state.document.validate(transaction);
-
-        if (!validation.valid) {
-          // Track rejection
-          yield* Metric.increment(Metrics.transactionsRejected);
-          const latency = Date.now() - submitStartTime;
-          yield* Metric.update(Metrics.transactionsLatency, latency);
-
-          return {
-            success: false as const,
-            reason: validation.reason,
-          };
-        }
-
-        // Phase 2: Append to WAL with gap check (BEFORE state mutation)
-        const walEntry: WalEntry = {
-          transaction,
-          version: validation.nextVersion,
-          timestamp: Date.now(),
-        };
-
-        const appendResult = yield* Effect.either(
-          hotStorage.appendWithCheck(documentId, walEntry, validation.nextVersion)
+        // Use DocumentInstance's submit method, catching storage errors
+        return yield* instance.submit(transaction).pipe(
+          Effect.catchAll((error) =>
+            Effect.succeed({
+              success: false as const,
+              reason: `Storage error: ${String(error)}`,
+            })
+          )
         );
-
-        if (appendResult._tag === "Left") {
-          // WAL append failed - do NOT apply, state unchanged
-          yield* Effect.logError("WAL append failed", {
-            documentId,
-            version: validation.nextVersion,
-            error: appendResult.left,
-          });
-          yield* Metric.increment(Metrics.walAppendFailures);
-
-          const latency = Date.now() - submitStartTime;
-          yield* Metric.update(Metrics.transactionsLatency, latency);
-
-          // Return failure - client must retry
-          return {
-            success: false as const,
-            reason: "Storage unavailable. Please retry.",
-          };
-        }
-
-        // Phase 3: Apply (state mutation + broadcast)
-        state.document.apply(transaction);
-
-        // Track metrics
-        const latency = Date.now() - submitStartTime;
-        yield* Metric.update(Metrics.transactionsLatency, latency);
-        yield* Metric.increment(Metrics.transactionsProcessed);
-        yield* Metric.increment(Metrics.storageWalAppends);
-
-        // Increment transaction count
-        yield* Ref.update(stateRef, (s) => ({
-          ...s,
-          transactionsSinceSnapshot: s.transactionsSinceSnapshot + 1,
-        }));
-
-        // Check snapshot triggers
-        yield* checkSnapshotTriggers();
-
-        return {
-          success: true as const,
-          version: validation.nextVersion,
-        };
       }),
 
       GetSnapshot: Effect.fn("cluster.document.snapshot.get")(function* () {
-        const state = yield* Ref.get(stateRef);
-        return state.document.getSnapshot();
+        return instance.getSnapshot();
       }),
 
       Touch: Effect.fn("cluster.document.touch")(function* () {
-        // Entity touch is handled automatically by the cluster framework
-        // Just update last activity time conceptually
-        return void 0;
+        yield* instance.touch();
       }),
 
       SetPresence: Effect.fn("cluster.presence.set")(function* ({ payload }) {
