@@ -116,6 +116,26 @@ export const storageSnapshotLatency = Metric.histogram(
  */
 export const storageWalAppends = Metric.counter("mimic.storage.wal_appends");
 
+/**
+ * Version gaps detected during WAL replay
+ */
+export const storageVersionGaps = Metric.counter("mimic.storage.version_gaps");
+
+/**
+ * Failed WAL appends causing transaction rollback
+ */
+export const walAppendFailures = Metric.counter("mimic.storage.wal_append_failures");
+
+/**
+ * ColdStorage load failures during document restore
+ */
+export const coldStorageLoadFailures = Metric.counter("mimic.storage.cold_load_failures");
+
+/**
+ * HotStorage getEntries failures during document restore
+ */
+export const hotStorageLoadFailures = Metric.counter("mimic.storage.hot_load_failures");
+
 // =============================================================================
 // Presence Metrics
 // =============================================================================
@@ -156,6 +176,10 @@ export const MimicMetrics = {
   storageSnapshots,
   storageSnapshotLatency,
   storageWalAppends,
+  storageVersionGaps,
+  walAppendFailures,
+  coldStorageLoadFailures,
+  hotStorageLoadFailures,
 
   // Presence
   presenceUpdates,

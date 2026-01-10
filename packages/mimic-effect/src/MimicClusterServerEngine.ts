@@ -286,10 +286,9 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
       );
     };
 
-    // Load snapshot from ColdStorage
-    const storedDoc = yield* Effect.catchAll(
-      coldStorage.load(documentId),
-      () => Effect.succeed(undefined)
+    // Load snapshot from ColdStorage (fatal if unavailable - entity cannot start)
+    const storedDoc = yield* coldStorage.load(documentId).pipe(
+      Effect.orDie  // Entity cannot initialize without storage
     );
 
     let initialState: Primitive.InferSetInput<TSchema> | undefined;
@@ -347,12 +346,41 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
     // Update state with document
     yield* Ref.update(stateRef, (s) => ({ ...s, document }));
 
-    // Replay WAL entries
-    const walEntries = yield* Effect.catchAll(
-      hotStorage.getEntries(documentId, initialVersion),
-      () => Effect.succeed([] as WalEntry[])
+    // Load WAL entries (fatal if unavailable - entity cannot start)
+    const walEntries = yield* hotStorage.getEntries(documentId, initialVersion).pipe(
+      Effect.orDie  // Entity cannot initialize without storage
     );
 
+    // Verify WAL continuity (warning only, non-blocking)
+    if (walEntries.length > 0) {
+      const firstWalVersion = walEntries[0]!.version;
+      const expectedFirst = initialVersion + 1;
+
+      if (firstWalVersion !== expectedFirst) {
+        yield* Effect.logWarning("WAL version gap detected", {
+          documentId,
+          snapshotVersion: initialVersion,
+          firstWalVersion,
+          expectedFirst,
+        });
+        yield* Metric.increment(Metrics.storageVersionGaps);
+      }
+
+      // Check internal gaps
+      for (let i = 1; i < walEntries.length; i++) {
+        const prev = walEntries[i - 1]!.version;
+        const curr = walEntries[i]!.version;
+        if (curr !== prev + 1) {
+          yield* Effect.logWarning("WAL internal gap detected", {
+            documentId,
+            previousVersion: prev,
+            currentVersion: curr,
+          });
+        }
+      }
+    }
+
+    // Replay WAL entries
     for (const entry of walEntries) {
       const result = document.submit(entry.transaction);
       if (!result.success) {
@@ -373,13 +401,20 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
     yield* Metric.incrementBy(Metrics.documentsActive, 1);
 
     /**
-     * Save snapshot to ColdStorage
+     * Save snapshot to ColdStorage.
+     * Idempotent: skips save if already snapshotted at current version.
+     * Truncate failures are non-fatal and will be retried on next snapshot.
      */
     const saveSnapshot = Effect.gen(function* () {
       const state = yield* Ref.get(stateRef);
-      const docState = state.document.get();
       const version = state.document.getVersion();
 
+      // Idempotency check: skip if already snapshotted at this version
+      if (version <= state.lastSnapshotVersion) {
+        return;
+      }
+
+      const docState = state.document.get();
       if (docState === undefined) {
         return;
       }
@@ -393,6 +428,7 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
 
       const snapshotStartTime = Date.now();
 
+      // Save to ColdStorage (best effort - log error but don't crash entity)
       yield* Effect.catchAll(
         coldStorage.save(documentId, storedDocument),
         (e) =>
@@ -403,16 +439,22 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
       yield* Metric.increment(Metrics.storageSnapshots);
       yield* Metric.update(Metrics.storageSnapshotLatency, snapshotDuration);
 
-      yield* Effect.catchAll(hotStorage.truncate(documentId, version), (e) =>
-        Effect.logError("Failed to truncate WAL", { documentId, error: e })
-      );
-
+      // Update tracking BEFORE truncate (for idempotency on retry)
       yield* Ref.update(stateRef, (s) => ({
         ...s,
         lastSnapshotVersion: version,
         lastSnapshotTime: Date.now(),
         transactionsSinceSnapshot: 0,
       }));
+
+      // Truncate WAL - non-fatal, will be retried on next snapshot
+      yield* Effect.catchAll(hotStorage.truncate(documentId, version), (e) =>
+        Effect.logWarning("WAL truncate failed - will retry on next snapshot", {
+          documentId,
+          version,
+          error: e,
+        })
+      );
     });
 
     /**
@@ -464,22 +506,35 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
         yield* Metric.update(Metrics.transactionsLatency, latency);
 
         if (result.success) {
-          yield* Metric.increment(Metrics.transactionsProcessed);
-
-          // Append to WAL
+          // Append to WAL - MUST succeed for transaction durability
           const walEntry: WalEntry = {
             transaction,
             version: result.version,
             timestamp: Date.now(),
           };
 
-          yield* Effect.catchAll(hotStorage.append(documentId, walEntry), (e) =>
-            Effect.logError("Failed to append to WAL", {
-              documentId,
-              error: e,
-            })
+          const appendResult = yield* Effect.either(
+            hotStorage.append(documentId, walEntry)
           );
 
+          if (appendResult._tag === "Left") {
+            // WAL append failed - transaction is NOT durable
+            yield* Effect.logError("WAL append failed - rolling back transaction", {
+              documentId,
+              version: result.version,
+              error: appendResult.left,
+            });
+            yield* Metric.increment(Metrics.walAppendFailures);
+
+            // Return failure - client must retry
+            return {
+              success: false as const,
+              reason: "Storage unavailable. Please retry.",
+            };
+          }
+
+          // WAL append succeeded - transaction is durable
+          yield* Metric.increment(Metrics.transactionsProcessed);
           yield* Metric.increment(Metrics.storageWalAppends);
 
           // Increment transaction count

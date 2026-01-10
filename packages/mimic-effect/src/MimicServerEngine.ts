@@ -31,6 +31,7 @@ import {
   DocumentManagerConfigTag,
   layer as documentManagerLayer,
   type SubmitResult,
+  type DocumentManagerError,
 } from "./DocumentManager";
 import {
   PresenceManagerTag,
@@ -51,27 +52,30 @@ export interface MimicServerEngine {
   /**
    * Submit a transaction to a document.
    * Authorization is checked against the auth service.
+   * May fail with DocumentManagerError if storage is unavailable.
    */
   readonly submit: (
     documentId: string,
     transaction: Transaction.Transaction
-  ) => Effect.Effect<SubmitResult, never>;
+  ) => Effect.Effect<SubmitResult, DocumentManagerError>;
 
   /**
    * Get document snapshot (current state and version).
+   * May fail with DocumentManagerError if storage is unavailable.
    */
   readonly getSnapshot: (
     documentId: string
-  ) => Effect.Effect<{ state: unknown; version: number }, never>;
+  ) => Effect.Effect<{ state: unknown; version: number }, DocumentManagerError>;
 
   /**
    * Subscribe to document broadcasts (transactions).
    * Returns a stream of server messages.
    * Requires a Scope for cleanup when the subscription ends.
+   * May fail with DocumentManagerError if storage is unavailable.
    */
   readonly subscribe: (
     documentId: string
-  ) => Effect.Effect<Stream.Stream<Protocol.ServerMessage, never, never>, never, Scope.Scope>;
+  ) => Effect.Effect<Stream.Stream<Protocol.ServerMessage, never, never>, DocumentManagerError, Scope.Scope>;
 
   /**
    * Touch document to prevent idle garbage collection.

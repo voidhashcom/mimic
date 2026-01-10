@@ -12,7 +12,6 @@ import {
   Context,
   Duration,
   Effect,
-  Fiber,
   HashMap,
   Layer,
   Metric,
@@ -25,14 +24,14 @@ import {
 import { Primitive, Transaction } from "@voidhash/mimic";
 import { ServerDocument } from "@voidhash/mimic/server";
 import type {
-  Initial,
   ResolvedConfig,
   StoredDocument,
   WalEntry,
 } from "./Types";
 import type { SnapshotMessage, ServerBroadcast } from "./Protocol";
-import { ColdStorageTag, type ColdStorage } from "./ColdStorage";
-import { HotStorageTag, type HotStorage } from "./HotStorage";
+import { ColdStorageTag } from "./ColdStorage";
+import { HotStorageTag } from "./HotStorage";
+import { ColdStorageError, HotStorageError } from "./Errors";
 import * as Metrics from "./Metrics";
 
 // =============================================================================
@@ -51,28 +50,36 @@ export type SubmitResult =
 // =============================================================================
 
 /**
+ * Error type for DocumentManager operations
+ */
+export type DocumentManagerError = ColdStorageError | HotStorageError;
+
+/**
  * Internal service for managing document lifecycle.
  */
 export interface DocumentManager {
   /**
    * Submit a transaction to a document.
+   * May fail with ColdStorageError or HotStorageError if storage is unavailable.
    */
   readonly submit: (
     documentId: string,
     transaction: Transaction.Transaction
-  ) => Effect.Effect<SubmitResult>;
+  ) => Effect.Effect<SubmitResult, DocumentManagerError>;
 
   /**
    * Get a snapshot of a document.
+   * May fail with ColdStorageError or HotStorageError if storage is unavailable.
    */
-  readonly getSnapshot: (documentId: string) => Effect.Effect<SnapshotMessage>;
+  readonly getSnapshot: (documentId: string) => Effect.Effect<SnapshotMessage, DocumentManagerError>;
 
   /**
    * Subscribe to broadcasts for a document.
+   * May fail with ColdStorageError or HotStorageError if storage is unavailable.
    */
   readonly subscribe: (
     documentId: string
-  ) => Effect.Effect<Stream.Stream<ServerBroadcast>, never, Scope.Scope>;
+  ) => Effect.Effect<Stream.Stream<ServerBroadcast>, DocumentManagerError, Scope.Scope>;
 
   /**
    * Touch a document to update its last activity time.
@@ -133,11 +140,7 @@ export class DocumentManagerConfigTag extends Context.Tag(
  * Create the DocumentManager layer.
  * Requires ColdStorage, HotStorage, and DocumentManagerConfig.
  */
-export const layer: Layer.Layer<
-  DocumentManagerTag,
-  never,
-  ColdStorageTag | HotStorageTag | DocumentManagerConfigTag
-> = Layer.scoped(
+export const layer = Layer.scoped(
   DocumentManagerTag,
   Effect.gen(function* () {
     const coldStorage = yield* ColdStorageTag;
@@ -175,13 +178,10 @@ export const layer: Layer.Layer<
      */
     const restoreDocument = (
       documentId: string
-    ): Effect.Effect<DocumentInstance<typeof config.schema>> =>
+    ): Effect.Effect<DocumentInstance<typeof config.schema>, ColdStorageError | HotStorageError> =>
       Effect.gen(function* () {
-        // 1. Load snapshot from ColdStorage
-        const storedDoc = yield* Effect.catchAll(
-          coldStorage.load(documentId),
-          () => Effect.succeed(undefined)
-        );
+        // 1. Load snapshot from ColdStorage (errors propagate - do not silently fallback)
+        const storedDoc = yield* coldStorage.load(documentId);
 
         let initialState: Primitive.InferSetInput<typeof config.schema> | undefined;
         let initialVersion = 0;
@@ -232,12 +232,39 @@ export const layer: Layer.Layer<
           },
         });
 
-        // 5. Load and replay WAL entries
-        const walEntries = yield* Effect.catchAll(
-          hotStorage.getEntries(documentId, initialVersion),
-          () => Effect.succeed([] as WalEntry[])
-        );
+        // 5. Load WAL entries (errors propagate - do not silently fallback)
+        const walEntries = yield* hotStorage.getEntries(documentId, initialVersion);
 
+        // 6. Verify WAL continuity (warning only, non-blocking)
+        if (walEntries.length > 0) {
+          const firstWalVersion = walEntries[0]!.version;
+          const expectedFirst = initialVersion + 1;
+
+          if (firstWalVersion !== expectedFirst) {
+            yield* Effect.logWarning("WAL version gap detected", {
+              documentId,
+              snapshotVersion: initialVersion,
+              firstWalVersion,
+              expectedFirst,
+            });
+            yield* Metric.increment(Metrics.storageVersionGaps);
+          }
+
+          // Check internal gaps
+          for (let i = 1; i < walEntries.length; i++) {
+            const prev = walEntries[i - 1]!.version;
+            const curr = walEntries[i]!.version;
+            if (curr !== prev + 1) {
+              yield* Effect.logWarning("WAL internal gap detected", {
+                documentId,
+                previousVersion: prev,
+                currentVersion: curr,
+              });
+            }
+          }
+        }
+
+        // 7. Replay WAL entries
         for (const entry of walEntries) {
           const result = document.submit(entry.transaction);
           if (!result.success) {
@@ -274,7 +301,7 @@ export const layer: Layer.Layer<
      */
     const getOrCreateDocument = (
       documentId: string
-    ): Effect.Effect<DocumentInstance<typeof config.schema>> =>
+    ): Effect.Effect<DocumentInstance<typeof config.schema>, ColdStorageError | HotStorageError> =>
       Effect.gen(function* () {
         const current = yield* Ref.get(store);
         const existing = HashMap.get(current, documentId);
@@ -297,16 +324,24 @@ export const layer: Layer.Layer<
       });
 
     /**
-     * Save a snapshot to ColdStorage and truncate WAL
+     * Save a snapshot to ColdStorage and truncate WAL.
+     * Idempotent: skips save if already snapshotted at current version.
+     * Truncate failures are non-fatal and will be retried on next snapshot.
      */
     const saveSnapshot = (
       documentId: string,
       instance: DocumentInstance<typeof config.schema>
-    ): Effect.Effect<void> =>
+    ): Effect.Effect<void, ColdStorageError> =>
       Effect.gen(function* () {
-        const state = instance.document.get();
         const version = instance.document.getVersion();
+        const lastSnapshotVersion = yield* Ref.get(instance.lastSnapshotVersion);
 
+        // Idempotency check: skip if already snapshotted at this version
+        if (version <= lastSnapshotVersion) {
+          return;
+        }
+
+        const state = instance.document.get();
         if (state === undefined) {
           return;
         }
@@ -320,25 +355,27 @@ export const layer: Layer.Layer<
 
         const snapshotStartTime = Date.now();
 
-        // Save to ColdStorage
-        yield* Effect.catchAll(coldStorage.save(documentId, storedDoc), (e) =>
-          Effect.logError("Failed to save snapshot", { documentId, error: e })
-        );
+        // Save to ColdStorage - let errors propagate
+        yield* coldStorage.save(documentId, storedDoc);
 
         // Track snapshot metrics
         const snapshotDuration = Date.now() - snapshotStartTime;
         yield* Metric.increment(Metrics.storageSnapshots);
         yield* Metric.update(Metrics.storageSnapshotLatency, snapshotDuration);
 
-        // Truncate WAL
-        yield* Effect.catchAll(hotStorage.truncate(documentId, version), (e) =>
-          Effect.logError("Failed to truncate WAL", { documentId, error: e })
-        );
-
-        // Update tracking
+        // Update tracking BEFORE truncate (for idempotency on retry)
         yield* Ref.set(instance.lastSnapshotVersion, version);
         yield* Ref.set(instance.lastSnapshotTime, Date.now());
         yield* Ref.set(instance.transactionsSinceSnapshot, 0);
+
+        // Truncate WAL - non-fatal, will be retried on next snapshot
+        yield* Effect.catchAll(hotStorage.truncate(documentId, version), (e) =>
+          Effect.logWarning("WAL truncate failed - will retry on next snapshot", {
+            documentId,
+            version,
+            error: e,
+          })
+        );
       });
 
     /**
@@ -347,7 +384,7 @@ export const layer: Layer.Layer<
     const checkSnapshotTriggers = (
       documentId: string,
       instance: DocumentInstance<typeof config.schema>
-    ): Effect.Effect<void> =>
+    ): Effect.Effect<void, ColdStorageError> =>
       Effect.gen(function* () {
         const txCount = yield* Ref.get(instance.transactionsSinceSnapshot);
         const lastTime = yield* Ref.get(instance.lastSnapshotTime);
@@ -381,8 +418,13 @@ export const layer: Layer.Layer<
         for (const [documentId, instance] of current) {
           const lastActivity = yield* Ref.get(instance.lastActivityTime);
           if (now - lastActivity >= maxIdleMs) {
-            // Save final snapshot before eviction
-            yield* saveSnapshot(documentId, instance);
+            // Save final snapshot before eviction (best effort)
+            yield* Effect.catchAll(saveSnapshot(documentId, instance), (e) =>
+              Effect.logError("Failed to save snapshot during eviction", {
+                documentId,
+                error: e,
+              })
+            );
 
             // Remove from store
             yield* Ref.update(store, (map) => HashMap.remove(map, documentId));
@@ -413,7 +455,13 @@ export const layer: Layer.Layer<
       Effect.gen(function* () {
         const current = yield* Ref.get(store);
         for (const [documentId, instance] of current) {
-          yield* saveSnapshot(documentId, instance);
+          // Best effort save - don't fail shutdown if storage is unavailable
+          yield* Effect.catchAll(saveSnapshot(documentId, instance), (e) =>
+            Effect.logError("Failed to save snapshot during shutdown", {
+              documentId,
+              error: e,
+            })
+          );
         }
         yield* Effect.logInfo("DocumentManager shutdown complete");
       })
@@ -433,26 +481,35 @@ export const layer: Layer.Layer<
           yield* Metric.update(Metrics.transactionsLatency, latency);
 
           if (result.success) {
-            // Track success
-            yield* Metric.increment(Metrics.transactionsProcessed);
-
-            // Append to WAL
+            // Append to WAL - MUST succeed for transaction durability
             const walEntry: WalEntry = {
               transaction,
               version: result.version,
               timestamp: Date.now(),
             };
 
-            yield* Effect.catchAll(
-              hotStorage.append(documentId, walEntry),
-              (e) =>
-                Effect.logError("Failed to append to WAL", {
-                  documentId,
-                  error: e,
-                })
+            const appendResult = yield* Effect.either(
+              hotStorage.append(documentId, walEntry)
             );
 
-            // Track WAL append
+            if (appendResult._tag === "Left") {
+              // WAL append failed - transaction is NOT durable
+              yield* Effect.logError("WAL append failed - rolling back transaction", {
+                documentId,
+                version: result.version,
+                error: appendResult.left,
+              });
+              yield* Metric.increment(Metrics.walAppendFailures);
+
+              // Return failure - client must retry
+              return {
+                success: false as const,
+                reason: "Storage unavailable. Please retry.",
+              };
+            }
+
+            // WAL append succeeded - transaction is durable
+            yield* Metric.increment(Metrics.transactionsProcessed);
             yield* Metric.increment(Metrics.storageWalAppends);
 
             // Increment transaction count

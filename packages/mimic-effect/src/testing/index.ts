@@ -62,6 +62,17 @@ export {
   HotStorageTestSuite,
   type HotStorageTestError,
 } from "./HotStorageTestSuite";
+export { StorageIntegrationTestSuite } from "./StorageIntegrationTestSuite";
+
+// =============================================================================
+// Test Utilities
+// =============================================================================
+
+export {
+  FailingStorage,
+  type FailingColdStorageConfig,
+  type FailingHotStorageConfig,
+} from "./FailingStorage";
 
 // =============================================================================
 // Re-export Categories for Convenience
@@ -69,3 +80,4 @@ export {
 
 export { Categories as ColdStorageCategories } from "./ColdStorageTestSuite";
 export { Categories as HotStorageCategories } from "./HotStorageTestSuite";
+export { Categories as IntegrationCategories } from "./StorageIntegrationTestSuite";
