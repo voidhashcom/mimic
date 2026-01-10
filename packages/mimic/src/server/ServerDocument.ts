@@ -68,8 +68,13 @@ export type ValidateResult =
 export interface ServerDocumentOptions<TSchema extends Primitive.AnyPrimitive> {
   /** The schema defining the document structure */
   readonly schema: TSchema;
-  /** Initial value (optional, will use schema defaults if not provided) - uses set input format */
-  readonly initialState?: Primitive.InferSetInput<TSchema>;
+  /** Initial value for new documents (uses set input format, gets converted to state) */
+  readonly initial?: Primitive.InferSetInput<TSchema>;
+  /**
+   * Raw initial state (already in internal state format).
+   * Use this when restoring from storage. Takes precedence over `initial`.
+   */
+  readonly initialState?: Primitive.InferState<TSchema>;
   /** Initial version number (optional, defaults to 0) */
   readonly initialVersion?: number;
   /** Called when a transaction is successfully applied and should be broadcast */
@@ -150,6 +155,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 ): ServerDocument<TSchema> => {
   const {
     schema,
+    initial,
     initialState,
     initialVersion = 0,
     onBroadcast,
@@ -162,7 +168,8 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   // ==========================================================================
 
   // The authoritative document
-  let _document = Document.make(schema, { initial: initialState });
+  // initialState (raw) takes precedence over initial (needs conversion)
+  let _document = Document.make(schema, { initial, initialState });
 
   // Current version number (incremented on each successful transaction)
   let _version = initialVersion;

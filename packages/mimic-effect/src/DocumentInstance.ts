@@ -105,15 +105,20 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     // 1. Load snapshot from ColdStorage
     const storedDoc = yield* coldStorage.load(documentId);
 
-    let initialState: Primitive.InferSetInput<TSchema> | undefined;
+    // Track initial values - only one will be set:
+    // - initialState: raw state from storage (already in internal format)
+    // - initial: computed from config (needs conversion to state format)
+    let initialState: Primitive.InferState<TSchema> | undefined;
+    let initial: Primitive.InferSetInput<TSchema> | undefined;
     let initialVersion = 0;
 
     if (storedDoc) {
-      initialState = storedDoc.state as Primitive.InferSetInput<TSchema>;
+      // Loading from storage - state is already in internal format
+      initialState = storedDoc.state as Primitive.InferState<TSchema>;
       initialVersion = storedDoc.version;
     } else {
-      // Compute initial state
-      initialState = yield* computeInitialState(config, documentId);
+      // New document - compute initial value (set input format)
+      initial = yield* computeInitialState(config, documentId);
     }
 
     // 2. Create PubSub for broadcasting
@@ -128,6 +133,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     // 4. Create ServerDocument with callbacks
     const document = ServerDocument.make({
       schema: config.schema,
+      initial,
       initialState,
       initialVersion,
       maxTransactionHistory: config.maxTransactionHistory,
