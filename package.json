@@ -10,7 +10,8 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "test": "turbo test",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "release": "./scripts/release.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.6",
