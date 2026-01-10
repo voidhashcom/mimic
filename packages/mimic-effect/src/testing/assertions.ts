@@ -12,6 +12,8 @@ import { TestError } from "./types";
 
 /**
  * Deep equality check that handles objects, arrays, and primitives.
+ * Skips function properties since reconstructed objects (like OperationPath)
+ * will have new function instances even when the underlying data is identical.
  */
 export const isDeepEqual = (a: unknown, b: unknown): boolean => {
   if (a === b) return true;
@@ -20,6 +22,9 @@ export const isDeepEqual = (a: unknown, b: unknown): boolean => {
   if (a === undefined || b === undefined) return a === b;
 
   if (typeof a !== typeof b) return false;
+
+  // Skip function comparison - functions with same behavior but different references should be considered equal
+  if (typeof a === "function" && typeof b === "function") return true;
 
   if (typeof a === "number" && typeof b === "number") {
     if (Number.isNaN(a) && Number.isNaN(b)) return true;
@@ -37,8 +42,10 @@ export const isDeepEqual = (a: unknown, b: unknown): boolean => {
   if (typeof a === "object" && typeof b === "object") {
     const aObj = a as Record<string, unknown>;
     const bObj = b as Record<string, unknown>;
-    const aKeys = Object.keys(aObj);
-    const bKeys = Object.keys(bObj);
+
+    // Filter out function properties for comparison
+    const aKeys = Object.keys(aObj).filter(k => typeof aObj[k] !== "function");
+    const bKeys = Object.keys(bObj).filter(k => typeof bObj[k] !== "function");
 
     if (aKeys.length !== bKeys.length) return false;
 
