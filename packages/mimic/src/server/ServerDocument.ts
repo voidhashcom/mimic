@@ -50,6 +50,14 @@ export type SubmitResult =
   | { readonly success: true; readonly version: number }
   | { readonly success: false; readonly reason: string };
 
+/**
+ * Result of validating a transaction (two-phase commit: phase 1).
+ * If valid, returns the version this transaction will get when applied.
+ */
+export type ValidateResult =
+  | { readonly valid: true; readonly nextVersion: number }
+  | { readonly valid: false; readonly reason: string };
+
 // =============================================================================
 // Server Document Types
 // =============================================================================
@@ -86,8 +94,32 @@ export interface ServerDocument<TSchema extends Primitive.AnyPrimitive> {
   getVersion(): number;
 
   /**
-   * Submits a transaction for processing.
+   * Phase 1 of two-phase commit: Validates a transaction without side effects.
+   * Returns the version this transaction would get if applied.
+   * Does NOT modify state, increment version, record transaction, or broadcast.
+   *
+   * Use this to validate before writing to WAL, then call apply() after WAL success.
+   *
+   * @param transaction - The transaction to validate
+   * @returns ValidateResult with nextVersion if valid, or reason if invalid
+   */
+  validate(transaction: Transaction.Transaction): ValidateResult;
+
+  /**
+   * Phase 2 of two-phase commit: Applies a pre-validated transaction.
+   * MUST only be called after validate() succeeded AND WAL write succeeded.
+   * Mutates state, increments version, records transaction ID, and broadcasts.
+   *
+   * @param transaction - The transaction to apply (must have been validated first)
+   */
+  apply(transaction: Transaction.Transaction): void;
+
+  /**
+   * Submits a transaction for processing (combines validate + apply).
    * Validates and applies the transaction if valid, or rejects it with a reason.
+   *
+   * For two-phase commit with WAL, use validate() then apply() instead.
+   *
    * @param transaction - The transaction to process
    * @returns SubmitResult indicating success with version or failure with reason
    */
@@ -193,6 +225,33 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   };
 
   // ==========================================================================
+  // Internal Apply Logic
+  // ==========================================================================
+
+  /**
+   * Internal function to apply a transaction and broadcast.
+   * Called by both apply() and submit().
+   */
+  const applyAndBroadcast = (transaction: Transaction.Transaction): void => {
+    // Apply the transaction to the authoritative state
+    _document.apply(transaction.ops);
+
+    // Increment version
+    _version += 1;
+
+    // Record as processed
+    recordTransaction(transaction.id);
+
+    // Broadcast the confirmed transaction
+    const message: TransactionMessage = {
+      type: "transaction",
+      transaction,
+      version: _version,
+    };
+    onBroadcast(message);
+  };
+
+  // ==========================================================================
   // Public API
   // ==========================================================================
 
@@ -205,6 +264,31 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
     getVersion: (): number => {
       return _version;
+    },
+
+    validate: (transaction: Transaction.Transaction): ValidateResult => {
+      // Use internal validation helper
+      const validation = validateTransaction(transaction);
+
+      if (!validation.valid) {
+        return {
+          valid: false,
+          reason: validation.reason,
+        };
+      }
+
+      // Return the version this transaction will get when applied
+      return {
+        valid: true,
+        nextVersion: _version + 1,
+      };
+    },
+
+    apply: (transaction: Transaction.Transaction): void => {
+      // Apply and broadcast
+      // Note: This assumes validate() was called first and WAL write succeeded
+      // We don't re-validate here for performance - caller is responsible
+      applyAndBroadcast(transaction);
     },
 
     submit: (transaction: Transaction.Transaction): SubmitResult => {
@@ -223,27 +307,13 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
       // Apply the transaction to the authoritative state
       try {
-        _document.apply(transaction.ops);
+        applyAndBroadcast(transaction);
       } catch (error) {
         // This shouldn't happen since we validated, but handle gracefully
         const reason = error instanceof Error ? error.message : String(error);
         onRejection?.(transaction.id, reason);
         return { success: false, reason };
       }
-
-      // Increment version
-      _version += 1;
-
-      // Record as processed
-      recordTransaction(transaction.id);
-
-      // Broadcast the confirmed transaction
-      const message: TransactionMessage = {
-        type: "transaction",
-        transaction,
-        version: _version,
-      };
-      onBroadcast(message);
 
       return {
         success: true,

@@ -8,7 +8,7 @@
 import { Effect } from "effect";
 import { Transaction } from "@voidhash/mimic";
 import { HotStorageTag } from "../HotStorage";
-import type { HotStorageError } from "../Errors";
+import { type HotStorageError, WalVersionGapError } from "../Errors";
 import type { WalEntry } from "../Types";
 import type { StorageTestCase, TestResults } from "./types";
 import { TestError } from "./types";
@@ -21,9 +21,9 @@ import {
 } from "./assertions";
 
 /**
- * Error type for HotStorage tests - can be either a TestError or a HotStorageError
+ * Error type for HotStorage tests - can be either a TestError, HotStorageError, or WalVersionGapError
  */
-export type HotStorageTestError = TestError | HotStorageError;
+export type HotStorageTestError = TestError | HotStorageError | WalVersionGapError;
 
 // =============================================================================
 // Categories
@@ -38,6 +38,7 @@ export const Categories = {
   DocumentIsolation: "Document Isolation",
   LargeScaleOperations: "Large-Scale Operations",
   DocumentIdEdgeCases: "Document ID Edge Cases",
+  GapChecking: "Gap Checking",
 } as const;
 
 // =============================================================================
@@ -577,6 +578,130 @@ const tests: StorageTestCase<HotStorageTestError, HotStorageTag>[] = [
         !entriesFrom0.some((e) => e.version === 0),
         "Version 0 entry should be excluded with sinceVersion = 0"
       );
+    }),
+  },
+
+  // ---------------------------------------------------------------------------
+  // Gap Checking (appendWithCheck)
+  // ---------------------------------------------------------------------------
+  {
+    name: "appendWithCheck succeeds for first entry (expectedVersion=1)",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntry(1);
+      yield* storage.appendWithCheck("gap-check-first", entry, 1);
+      const entries = yield* storage.getEntries("gap-check-first", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      yield* assertEqual(entries[0]!.version, 1, "Entry version should be 1");
+    }),
+  },
+
+  {
+    name: "appendWithCheck succeeds for consecutive versions",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      yield* storage.appendWithCheck("gap-check-consecutive", makeEntry(1), 1);
+      yield* storage.appendWithCheck("gap-check-consecutive", makeEntry(2), 2);
+      yield* storage.appendWithCheck("gap-check-consecutive", makeEntry(3), 3);
+      const entries = yield* storage.getEntries("gap-check-consecutive", 0);
+      yield* assertLength(entries, 3, "Should have three entries");
+      yield* assertEqual(entries[0]!.version, 1, "First entry version should be 1");
+      yield* assertEqual(entries[1]!.version, 2, "Second entry version should be 2");
+      yield* assertEqual(entries[2]!.version, 3, "Third entry version should be 3");
+    }),
+  },
+
+  {
+    name: "appendWithCheck fails for version gap (skipping version 2)",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      yield* storage.appendWithCheck("gap-check-fail", makeEntry(1), 1);
+      // Attempt to append version 3, skipping version 2
+      const result = yield* Effect.either(
+        storage.appendWithCheck("gap-check-fail", makeEntry(3), 3)
+      );
+      yield* assertTrue(
+        result._tag === "Left",
+        "appendWithCheck should fail when there's a version gap"
+      );
+      if (result._tag === "Left") {
+        yield* assertTrue(
+          result.left._tag === "WalVersionGapError",
+          "Error should be WalVersionGapError"
+        );
+      }
+      // Verify version 3 was not appended
+      const entries = yield* storage.getEntries("gap-check-fail", 0);
+      yield* assertLength(entries, 1, "Should only have version 1");
+      yield* assertEqual(entries[0]!.version, 1, "Only version 1 should exist");
+    }),
+  },
+
+  {
+    name: "appendWithCheck fails if first entry is not version 1",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      // Attempt to append version 2 as first entry (expecting gap error)
+      const result = yield* Effect.either(
+        storage.appendWithCheck("gap-check-not-first", makeEntry(2), 2)
+      );
+      yield* assertTrue(
+        result._tag === "Left",
+        "appendWithCheck should fail when first entry is not version 1"
+      );
+      if (result._tag === "Left") {
+        yield* assertTrue(
+          result.left._tag === "WalVersionGapError",
+          "Error should be WalVersionGapError"
+        );
+      }
+      // Verify nothing was appended
+      const entries = yield* storage.getEntries("gap-check-not-first", 0);
+      yield* assertEmpty(entries, "No entries should exist after failed append");
+    }),
+  },
+
+  {
+    name: "appendWithCheck fails when entry already exists at expectedVersion",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      yield* storage.appendWithCheck("gap-check-duplicate", makeEntry(1), 1);
+      // Attempt to append another version 1
+      const result = yield* Effect.either(
+        storage.appendWithCheck("gap-check-duplicate", makeEntry(1), 1)
+      );
+      yield* assertTrue(
+        result._tag === "Left",
+        "appendWithCheck should fail when version already exists"
+      );
+      // Verify still only one entry
+      const entries = yield* storage.getEntries("gap-check-duplicate", 0);
+      yield* assertLength(entries, 1, "Should still only have one entry");
+    }),
+  },
+
+  {
+    name: "appendWithCheck after truncate works correctly",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      // Append versions 1, 2, 3
+      yield* storage.appendWithCheck("gap-check-truncate", makeEntry(1), 1);
+      yield* storage.appendWithCheck("gap-check-truncate", makeEntry(2), 2);
+      yield* storage.appendWithCheck("gap-check-truncate", makeEntry(3), 3);
+      // Truncate up to version 2
+      yield* storage.truncate("gap-check-truncate", 2);
+      // Now append version 4 (should succeed since last entry is version 3)
+      yield* storage.appendWithCheck("gap-check-truncate", makeEntry(4), 4);
+      const entries = yield* storage.getEntries("gap-check-truncate", 0);
+      yield* assertLength(entries, 2, "Should have versions 3 and 4");
+      yield* assertEqual(entries[0]!.version, 3, "First should be version 3");
+      yield* assertEqual(entries[1]!.version, 4, "Second should be version 4");
     }),
   },
 ];
