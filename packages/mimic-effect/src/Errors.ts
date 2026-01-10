@@ -23,8 +23,21 @@ export class ColdStorageError extends Data.TaggedError("ColdStorageError")<{
  */
 export class HotStorageError extends Data.TaggedError("HotStorageError")<{
   readonly documentId: string;
-  readonly operation: "append" | "getEntries" | "truncate";
+  readonly operation: "append" | "getEntries" | "truncate" | "appendWithCheck";
   readonly cause: unknown;
+}> {}
+
+/**
+ * Error when WAL append detects a version gap.
+ * This indicates either:
+ * - A bug in the application (skipped a version)
+ * - Concurrent writes to the same document
+ * - Data corruption in WAL storage
+ */
+export class WalVersionGapError extends Data.TaggedError("WalVersionGapError")<{
+  readonly documentId: string;
+  readonly expectedVersion: number;
+  readonly actualPreviousVersion: number | undefined;
 }> {}
 
 // =============================================================================
@@ -93,6 +106,7 @@ export class TransactionRejectedError extends Data.TaggedError(
 export type MimicError =
   | ColdStorageError
   | HotStorageError
+  | WalVersionGapError
   | AuthenticationError
   | AuthorizationError
   | MissingDocumentIdError

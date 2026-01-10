@@ -36,5 +36,6 @@ export type {
   ErrorMessage,
   SnapshotMessage,
   SubmitResult,
+  ValidateResult,
   ServerDocumentOptions,
 } from "./ServerDocument";

@@ -21,7 +21,7 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { Primitive, Transaction } from "@voidhash/mimic";
+import { Document, Primitive, Transaction } from "@voidhash/mimic";
 import { ServerDocument } from "@voidhash/mimic/server";
 import type {
   ResolvedConfig,
@@ -324,36 +324,70 @@ export const layer = Layer.scoped(
       });
 
     /**
-     * Save a snapshot to ColdStorage and truncate WAL.
-     * Idempotent: skips save if already snapshotted at current version.
+     * Save a snapshot to ColdStorage derived from WAL entries.
+     * This ensures snapshots are always based on durable WAL data.
+     * Idempotent: skips save if already snapshotted at target version.
      * Truncate failures are non-fatal and will be retried on next snapshot.
      */
     const saveSnapshot = (
       documentId: string,
-      instance: DocumentInstance<typeof config.schema>
-    ): Effect.Effect<void, ColdStorageError> =>
+      instance: DocumentInstance<typeof config.schema>,
+      targetVersion: number
+    ): Effect.Effect<void, ColdStorageError | HotStorageError> =>
       Effect.gen(function* () {
-        const version = instance.document.getVersion();
         const lastSnapshotVersion = yield* Ref.get(instance.lastSnapshotVersion);
 
         // Idempotency check: skip if already snapshotted at this version
-        if (version <= lastSnapshotVersion) {
+        if (targetVersion <= lastSnapshotVersion) {
           return;
         }
 
-        const state = instance.document.get();
-        if (state === undefined) {
+        const snapshotStartTime = Date.now();
+
+        // Load base snapshot from cold storage
+        const baseSnapshot = yield* coldStorage.load(documentId);
+        const baseVersion = baseSnapshot?.version ?? 0;
+        const baseState = baseSnapshot?.state as Primitive.InferState<typeof config.schema> | undefined;
+
+        // Load WAL entries from base to target
+        const walEntries = yield* hotStorage.getEntries(documentId, baseVersion);
+        const relevantEntries = walEntries.filter(e => e.version <= targetVersion);
+
+        if (relevantEntries.length === 0 && !baseSnapshot) {
+          // Nothing to snapshot
+          return;
+        }
+
+        // Rebuild state by replaying WAL on base
+        let snapshotState: Primitive.InferState<typeof config.schema> | undefined = baseState;
+        for (const entry of relevantEntries) {
+          // Create a temporary document to apply the transaction
+          const tempDoc = Document.make(config.schema, { initialState: snapshotState });
+          tempDoc.apply(entry.transaction.ops);
+          snapshotState = tempDoc.get();
+        }
+
+        if (snapshotState === undefined) {
+          return;
+        }
+
+        const snapshotVersion = relevantEntries.length > 0
+          ? relevantEntries[relevantEntries.length - 1]!.version
+          : baseVersion;
+
+        // Re-check before saving (in case another snapshot completed while we were working)
+        // This prevents a slower snapshot from overwriting a more recent one
+        const currentLastSnapshot = yield* Ref.get(instance.lastSnapshotVersion);
+        if (snapshotVersion <= currentLastSnapshot) {
           return;
         }
 
         const storedDoc: StoredDocument = {
-          state,
-          version,
+          state: snapshotState,
+          version: snapshotVersion,
           schemaVersion: SCHEMA_VERSION,
           savedAt: Date.now(),
         };
-
-        const snapshotStartTime = Date.now();
 
         // Save to ColdStorage - let errors propagate
         yield* coldStorage.save(documentId, storedDoc);
@@ -364,15 +398,15 @@ export const layer = Layer.scoped(
         yield* Metric.update(Metrics.storageSnapshotLatency, snapshotDuration);
 
         // Update tracking BEFORE truncate (for idempotency on retry)
-        yield* Ref.set(instance.lastSnapshotVersion, version);
+        yield* Ref.set(instance.lastSnapshotVersion, snapshotVersion);
         yield* Ref.set(instance.lastSnapshotTime, Date.now());
         yield* Ref.set(instance.transactionsSinceSnapshot, 0);
 
         // Truncate WAL - non-fatal, will be retried on next snapshot
-        yield* Effect.catchAll(hotStorage.truncate(documentId, version), (e) =>
+        yield* Effect.catchAll(hotStorage.truncate(documentId, snapshotVersion), (e) =>
           Effect.logWarning("WAL truncate failed - will retry on next snapshot", {
             documentId,
-            version,
+            version: snapshotVersion,
             error: e,
           })
         );
@@ -384,24 +418,25 @@ export const layer = Layer.scoped(
     const checkSnapshotTriggers = (
       documentId: string,
       instance: DocumentInstance<typeof config.schema>
-    ): Effect.Effect<void, ColdStorageError> =>
+    ): Effect.Effect<void, ColdStorageError | HotStorageError> =>
       Effect.gen(function* () {
         const txCount = yield* Ref.get(instance.transactionsSinceSnapshot);
         const lastTime = yield* Ref.get(instance.lastSnapshotTime);
         const now = Date.now();
+        const currentVersion = instance.document.getVersion();
 
         const intervalMs = Duration.toMillis(config.snapshot.interval);
         const threshold = config.snapshot.transactionThreshold;
 
         // Check transaction threshold
         if (txCount >= threshold) {
-          yield* saveSnapshot(documentId, instance);
+          yield* saveSnapshot(documentId, instance, currentVersion);
           return;
         }
 
         // Check time interval
         if (now - lastTime >= intervalMs) {
-          yield* saveSnapshot(documentId, instance);
+          yield* saveSnapshot(documentId, instance, currentVersion);
           return;
         }
       });
@@ -419,7 +454,8 @@ export const layer = Layer.scoped(
           const lastActivity = yield* Ref.get(instance.lastActivityTime);
           if (now - lastActivity >= maxIdleMs) {
             // Save final snapshot before eviction (best effort)
-            yield* Effect.catchAll(saveSnapshot(documentId, instance), (e) =>
+            const currentVersion = instance.document.getVersion();
+            yield* Effect.catchAll(saveSnapshot(documentId, instance, currentVersion), (e) =>
               Effect.logError("Failed to save snapshot during eviction", {
                 documentId,
                 error: e,
@@ -456,7 +492,8 @@ export const layer = Layer.scoped(
         const current = yield* Ref.get(store);
         for (const [documentId, instance] of current) {
           // Best effort save - don't fail shutdown if storage is unavailable
-          yield* Effect.catchAll(saveSnapshot(documentId, instance), (e) =>
+          const currentVersion = instance.document.getVersion();
+          yield* Effect.catchAll(saveSnapshot(documentId, instance, currentVersion), (e) =>
             Effect.logError("Failed to save snapshot during shutdown", {
               documentId,
               error: e,
@@ -473,59 +510,73 @@ export const layer = Layer.scoped(
           const instance = yield* getOrCreateDocument(documentId);
           const submitStartTime = Date.now();
 
-          // Submit to ServerDocument
-          const result = instance.document.submit(transaction);
+          // Phase 1: Validate (no side effects)
+          const validation = instance.document.validate(transaction);
 
-          // Track latency
-          const latency = Date.now() - submitStartTime;
-          yield* Metric.update(Metrics.transactionsLatency, latency);
-
-          if (result.success) {
-            // Append to WAL - MUST succeed for transaction durability
-            const walEntry: WalEntry = {
-              transaction,
-              version: result.version,
-              timestamp: Date.now(),
-            };
-
-            const appendResult = yield* Effect.either(
-              hotStorage.append(documentId, walEntry)
-            );
-
-            if (appendResult._tag === "Left") {
-              // WAL append failed - transaction is NOT durable
-              yield* Effect.logError("WAL append failed - rolling back transaction", {
-                documentId,
-                version: result.version,
-                error: appendResult.left,
-              });
-              yield* Metric.increment(Metrics.walAppendFailures);
-
-              // Return failure - client must retry
-              return {
-                success: false as const,
-                reason: "Storage unavailable. Please retry.",
-              };
-            }
-
-            // WAL append succeeded - transaction is durable
-            yield* Metric.increment(Metrics.transactionsProcessed);
-            yield* Metric.increment(Metrics.storageWalAppends);
-
-            // Increment transaction count
-            yield* Ref.update(
-              instance.transactionsSinceSnapshot,
-              (n) => n + 1
-            );
-
-            // Check snapshot triggers
-            yield* checkSnapshotTriggers(documentId, instance);
-          } else {
+          if (!validation.valid) {
             // Track rejection
             yield* Metric.increment(Metrics.transactionsRejected);
+            const latency = Date.now() - submitStartTime;
+            yield* Metric.update(Metrics.transactionsLatency, latency);
+
+            return {
+              success: false as const,
+              reason: validation.reason,
+            };
           }
 
-          return result;
+          // Phase 2: Append to WAL with gap check (BEFORE state mutation)
+          const walEntry: WalEntry = {
+            transaction,
+            version: validation.nextVersion,
+            timestamp: Date.now(),
+          };
+
+          const appendResult = yield* Effect.either(
+            hotStorage.appendWithCheck(documentId, walEntry, validation.nextVersion)
+          );
+
+          if (appendResult._tag === "Left") {
+            // WAL append failed - do NOT apply, state unchanged
+            yield* Effect.logError("WAL append failed", {
+              documentId,
+              version: validation.nextVersion,
+              error: appendResult.left,
+            });
+            yield* Metric.increment(Metrics.walAppendFailures);
+
+            const latency = Date.now() - submitStartTime;
+            yield* Metric.update(Metrics.transactionsLatency, latency);
+
+            // Return failure - client must retry
+            return {
+              success: false as const,
+              reason: "Storage unavailable. Please retry.",
+            };
+          }
+
+          // Phase 3: Apply (state mutation + broadcast)
+          instance.document.apply(transaction);
+
+          // Track metrics
+          const latency = Date.now() - submitStartTime;
+          yield* Metric.update(Metrics.transactionsLatency, latency);
+          yield* Metric.increment(Metrics.transactionsProcessed);
+          yield* Metric.increment(Metrics.storageWalAppends);
+
+          // Increment transaction count
+          yield* Ref.update(
+            instance.transactionsSinceSnapshot,
+            (n) => n + 1
+          );
+
+          // Check snapshot triggers
+          yield* checkSnapshotTriggers(documentId, instance);
+
+          return {
+            success: true as const,
+            version: validation.nextVersion,
+          };
         }),
 
       getSnapshot: (documentId) =>

@@ -525,4 +525,379 @@ describe("ServerDocument", () => {
       expect(broadcastMessages[2]?.version).toBe(3);
     });
   });
+
+  describe("validate (two-phase commit)", () => {
+    it("should return valid=true with nextVersion for valid transaction", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("Test");
+        }
+      );
+
+      const result = server.validate(tx);
+
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.nextVersion).toBe(1);
+      }
+    });
+
+    it("should return valid=false for empty transaction", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const emptyTx: Transaction.Transaction = {
+        id: crypto.randomUUID(),
+        ops: [],
+        timestamp: Date.now(),
+      };
+
+      const result = server.validate(emptyTx);
+
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.reason).toBe("Transaction is empty");
+      }
+    });
+
+    it("should return valid=false for duplicate transaction", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("First");
+        }
+      );
+
+      // Submit the transaction
+      server.submit(tx);
+
+      // Validate the same transaction again
+      const result = server.validate(tx);
+
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.reason).toBe("Transaction has already been processed");
+      }
+    });
+
+    it("should NOT modify state during validation", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("Should Not Apply");
+        }
+      );
+
+      const stateBefore = server.get();
+      const versionBefore = server.getVersion();
+
+      server.validate(tx);
+
+      // State and version should be unchanged
+      expect(server.get()).toEqual(stateBefore);
+      expect(server.getVersion()).toBe(versionBefore);
+      expect(broadcastMessages).toHaveLength(0);
+    });
+
+    it("should NOT add transaction to processed list during validation", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("Test");
+        }
+      );
+
+      server.validate(tx);
+
+      // Transaction should not be marked as processed
+      expect(server.hasProcessed(tx.id)).toBe(false);
+    });
+
+    it("should return incrementing nextVersion for multiple validations", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        initialVersion: 5,
+        onBroadcast,
+      });
+
+      const tx1 = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("First");
+        }
+      );
+
+      const result1 = server.validate(tx1);
+      expect(result1.valid).toBe(true);
+      if (result1.valid) {
+        expect(result1.nextVersion).toBe(6);
+      }
+
+      // Apply the first transaction
+      server.apply(tx1);
+
+      // Validate another transaction
+      const tx2 = createTransactionFromDoc(
+        TestSchema,
+        server.get(),
+        (root) => {
+          root.count.set(10);
+        }
+      );
+
+      const result2 = server.validate(tx2);
+      expect(result2.valid).toBe(true);
+      if (result2.valid) {
+        expect(result2.nextVersion).toBe(7);
+      }
+    });
+  });
+
+  describe("apply (two-phase commit)", () => {
+    it("should mutate state when applying transaction", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("Applied Title");
+          root.count.set(42);
+        }
+      );
+
+      server.apply(tx);
+
+      expect(server.get()?.title).toBe("Applied Title");
+      expect(server.get()?.count).toBe(42);
+    });
+
+    it("should increment version when applying transaction", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        initialVersion: 10,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("Test");
+        }
+      );
+
+      server.apply(tx);
+
+      expect(server.getVersion()).toBe(11);
+    });
+
+    it("should broadcast when applying transaction", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("Broadcast Test");
+        }
+      );
+
+      server.apply(tx);
+
+      expect(broadcastMessages).toHaveLength(1);
+      expect(broadcastMessages[0]).toEqual({
+        type: "transaction",
+        transaction: tx,
+        version: 1,
+      });
+    });
+
+    it("should mark transaction as processed when applying", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("Test");
+        }
+      );
+
+      expect(server.hasProcessed(tx.id)).toBe(false);
+
+      server.apply(tx);
+
+      expect(server.hasProcessed(tx.id)).toBe(true);
+    });
+  });
+
+  describe("validate + apply (two-phase commit flow)", () => {
+    it("should work correctly when used together", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const tx = createTransactionFromDoc(
+        TestSchema,
+        defaultInitialState,
+        (root) => {
+          root.title.set("Two Phase");
+          root.count.set(100);
+        }
+      );
+
+      // Phase 1: Validate
+      const validation = server.validate(tx);
+      expect(validation.valid).toBe(true);
+      if (validation.valid) {
+        expect(validation.nextVersion).toBe(1);
+      }
+
+      // At this point, state should be unchanged
+      expect(server.get()?.title).toBe("");
+      expect(server.get()?.count).toBe(0);
+      expect(server.getVersion()).toBe(0);
+
+      // Phase 2: Apply (after WAL success would happen in real code)
+      server.apply(tx);
+
+      // Now state should be updated
+      expect(server.get()?.title).toBe("Two Phase");
+      expect(server.get()?.count).toBe(100);
+      expect(server.getVersion()).toBe(1);
+      expect(broadcastMessages).toHaveLength(1);
+    });
+
+    it("should not apply if validation fails", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      const emptyTx: Transaction.Transaction = {
+        id: crypto.randomUUID(),
+        ops: [],
+        timestamp: Date.now(),
+      };
+
+      // Phase 1: Validate (should fail)
+      const validation = server.validate(emptyTx);
+      expect(validation.valid).toBe(false);
+
+      // Since validation failed, we should NOT call apply
+      // State should remain unchanged
+      expect(server.get()?.title).toBe("");
+      expect(server.getVersion()).toBe(0);
+      expect(broadcastMessages).toHaveLength(0);
+    });
+
+    it("should handle multiple two-phase commit cycles", () => {
+      const server = ServerDocument.make({
+        schema: TestSchema,
+        initialState: defaultInitialState,
+        onBroadcast,
+      });
+
+      // First cycle
+      const tx1 = createTransactionFromDoc(
+        TestSchema,
+        server.get(),
+        (root) => {
+          root.title.set("First");
+        }
+      );
+
+      const v1 = server.validate(tx1);
+      expect(v1.valid).toBe(true);
+      server.apply(tx1);
+
+      // Second cycle
+      const tx2 = createTransactionFromDoc(
+        TestSchema,
+        server.get(),
+        (root) => {
+          root.count.set(50);
+        }
+      );
+
+      const v2 = server.validate(tx2);
+      expect(v2.valid).toBe(true);
+      if (v2.valid) {
+        expect(v2.nextVersion).toBe(2);
+      }
+      server.apply(tx2);
+
+      // Third cycle
+      const tx3 = createTransactionFromDoc(
+        TestSchema,
+        server.get(),
+        (root) => {
+          root.title.set("Third");
+        }
+      );
+
+      const v3 = server.validate(tx3);
+      expect(v3.valid).toBe(true);
+      if (v3.valid) {
+        expect(v3.nextVersion).toBe(3);
+      }
+      server.apply(tx3);
+
+      expect(server.getVersion()).toBe(3);
+      expect(server.get()?.title).toBe("Third");
+      expect(server.get()?.count).toBe(50);
+      expect(broadcastMessages).toHaveLength(3);
+    });
+  });
 });
