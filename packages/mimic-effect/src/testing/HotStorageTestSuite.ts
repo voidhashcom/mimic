@@ -5,8 +5,8 @@
  * These tests verify that an adapter correctly implements the HotStorage interface
  * and can reliably store/retrieve WAL entries for document recovery.
  */
-import { Effect } from "effect";
-import { Transaction } from "@voidhash/mimic";
+import { Effect, Schema } from "effect";
+import { Transaction, OperationPath, Operation, OperationDefinition } from "@voidhash/mimic";
 import { HotStorageTag } from "../HotStorage";
 import { type HotStorageError, WalVersionGapError } from "../Errors";
 import type { WalEntry } from "../Types";
@@ -26,6 +26,31 @@ import {
 export type HotStorageTestError = TestError | HotStorageError | WalVersionGapError;
 
 // =============================================================================
+// Test Operation Definitions
+// =============================================================================
+
+/**
+ * Test operation definition for creating proper Operation objects in tests.
+ * Using Schema.Unknown allows any payload type for flexibility in testing.
+ */
+const TestSetDefinition = OperationDefinition.make({
+  kind: "test.set" as const,
+  payload: Schema.Unknown,
+  target: Schema.Unknown,
+  apply: (payload: unknown) => payload,
+});
+
+/**
+ * Custom operation definition for testing operation kind preservation.
+ */
+const CustomOpDefinition = OperationDefinition.make({
+  kind: "custom.operation" as const,
+  payload: Schema.Unknown,
+  target: Schema.Unknown,
+  apply: (payload: unknown) => payload,
+});
+
+// =============================================================================
 // Categories
 // =============================================================================
 
@@ -39,6 +64,7 @@ export const Categories = {
   LargeScaleOperations: "Large-Scale Operations",
   DocumentIdEdgeCases: "Document ID Edge Cases",
   GapChecking: "Gap Checking",
+  TransactionEncoding: "Transaction Encoding",
 } as const;
 
 // =============================================================================
@@ -57,7 +83,20 @@ const makeEntryWithData = (
   timestamp?: number
 ): WalEntry => ({
   transaction: Transaction.make([
-    { type: "set", path: ["data"], value: data },
+    Operation.fromDefinition(OperationPath.make("data"), TestSetDefinition, data),
+  ]),
+  version,
+  timestamp: timestamp ?? Date.now(),
+});
+
+const makeEntryWithPath = (
+  version: number,
+  pathString: string,
+  payload: unknown,
+  timestamp?: number
+): WalEntry => ({
+  transaction: Transaction.make([
+    Operation.fromDefinition(OperationPath.make(pathString), TestSetDefinition, payload),
   ]),
   version,
   timestamp: timestamp ?? Date.now(),
@@ -702,6 +741,310 @@ const tests: StorageTestCase<HotStorageTestError, HotStorageTag>[] = [
       yield* assertLength(entries, 2, "Should have versions 3 and 4");
       yield* assertEqual(entries[0]!.version, 3, "First should be version 3");
       yield* assertEqual(entries[1]!.version, 4, "Second should be version 4");
+    }),
+  },
+
+  // ---------------------------------------------------------------------------
+  // Transaction Encoding (Critical for OperationPath preservation)
+  // ---------------------------------------------------------------------------
+  {
+    name: "OperationPath has _tag after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "users/0/name", "Alice");
+      yield* storage.append("op-path-tag", entry);
+      const entries = yield* storage.getEntries("op-path-tag", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const op = entries[0]!.transaction.ops[0]!;
+      yield* assertTrue(
+        op.path._tag === "OperationPath",
+        "path should have _tag 'OperationPath'"
+      );
+    }),
+  },
+
+  {
+    name: "OperationPath.toTokens() works after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "users/0/name", "Alice");
+      yield* storage.append("op-path-tokens", entry);
+      const entries = yield* storage.getEntries("op-path-tokens", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const op = entries[0]!.transaction.ops[0]!;
+      yield* assertTrue(
+        typeof op.path.toTokens === "function",
+        "path.toTokens should be a function"
+      );
+      const tokens = op.path.toTokens();
+      yield* assertEqual(
+        tokens,
+        ["users", "0", "name"],
+        "toTokens() should return correct path tokens"
+      );
+    }),
+  },
+
+  {
+    name: "OperationPath.concat() works after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "users/0", { name: "Alice" });
+      yield* storage.append("op-path-concat", entry);
+      const entries = yield* storage.getEntries("op-path-concat", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const op = entries[0]!.transaction.ops[0]!;
+      yield* assertTrue(
+        typeof op.path.concat === "function",
+        "path.concat should be a function"
+      );
+      const extended = op.path.concat(OperationPath.make("name"));
+      yield* assertEqual(
+        extended.toTokens(),
+        ["users", "0", "name"],
+        "concat() should work correctly"
+      );
+    }),
+  },
+
+  {
+    name: "OperationPath.append() works after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "users", []);
+      yield* storage.append("op-path-append", entry);
+      const entries = yield* storage.getEntries("op-path-append", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const op = entries[0]!.transaction.ops[0]!;
+      yield* assertTrue(
+        typeof op.path.append === "function",
+        "path.append should be a function"
+      );
+      const extended = op.path.append("0");
+      yield* assertEqual(
+        extended.toTokens(),
+        ["users", "0"],
+        "append() should work correctly"
+      );
+    }),
+  },
+
+  {
+    name: "OperationPath.pop() works after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "users/0/name", "Alice");
+      yield* storage.append("op-path-pop", entry);
+      const entries = yield* storage.getEntries("op-path-pop", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const op = entries[0]!.transaction.ops[0]!;
+      yield* assertTrue(
+        typeof op.path.pop === "function",
+        "path.pop should be a function"
+      );
+      const popped = op.path.pop();
+      yield* assertEqual(
+        popped.toTokens(),
+        ["users", "0"],
+        "pop() should remove last token"
+      );
+    }),
+  },
+
+  {
+    name: "OperationPath.shift() works after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "users/0/name", "Alice");
+      yield* storage.append("op-path-shift", entry);
+      const entries = yield* storage.getEntries("op-path-shift", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const op = entries[0]!.transaction.ops[0]!;
+      yield* assertTrue(
+        typeof op.path.shift === "function",
+        "path.shift should be a function"
+      );
+      const shifted = op.path.shift();
+      yield* assertEqual(
+        shifted.toTokens(),
+        ["0", "name"],
+        "shift() should remove first token"
+      );
+    }),
+  },
+
+  {
+    name: "transaction with multiple operations preserves all OperationPaths",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry: WalEntry = {
+        transaction: Transaction.make([
+          Operation.fromDefinition(OperationPath.make("users/0/name"), TestSetDefinition, "Alice"),
+          Operation.fromDefinition(OperationPath.make("users/1/name"), TestSetDefinition, "Bob"),
+          Operation.fromDefinition(OperationPath.make("count"), TestSetDefinition, 2),
+        ]),
+        version: 1,
+        timestamp: Date.now(),
+      };
+      yield* storage.append("multi-op-paths", entry);
+      const entries = yield* storage.getEntries("multi-op-paths", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const ops = entries[0]!.transaction.ops;
+      yield* assertLength([...ops], 3, "Should have 3 operations");
+      // Verify all paths have working methods
+      for (const op of ops) {
+        yield* assertTrue(
+          op.path._tag === "OperationPath",
+          "Each operation path should have _tag"
+        );
+        yield* assertTrue(
+          typeof op.path.toTokens === "function",
+          "Each operation path should have toTokens method"
+        );
+      }
+      yield* assertEqual(
+        ops[0]!.path.toTokens(),
+        ["users", "0", "name"],
+        "First path should be correct"
+      );
+      yield* assertEqual(
+        ops[1]!.path.toTokens(),
+        ["users", "1", "name"],
+        "Second path should be correct"
+      );
+      yield* assertEqual(
+        ops[2]!.path.toTokens(),
+        ["count"],
+        "Third path should be correct"
+      );
+    }),
+  },
+
+  {
+    name: "nested path with many segments survives roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const deepPath = "level1/level2/level3/level4/level5";
+      const entry = makeEntryWithPath(1, deepPath, "deep value");
+      yield* storage.append("deep-path", entry);
+      const entries = yield* storage.getEntries("deep-path", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const op = entries[0]!.transaction.ops[0]!;
+      yield* assertEqual(
+        op.path.toTokens(),
+        ["level1", "level2", "level3", "level4", "level5"],
+        "Deep nested path should survive roundtrip"
+      );
+    }),
+  },
+
+  {
+    name: "empty path survives roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "", { root: true });
+      yield* storage.append("empty-path", entry);
+      const entries = yield* storage.getEntries("empty-path", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      const op = entries[0]!.transaction.ops[0]!;
+      yield* assertTrue(
+        op.path._tag === "OperationPath",
+        "Empty path should still be OperationPath"
+      );
+      yield* assertTrue(
+        typeof op.path.toTokens === "function",
+        "Empty path should have toTokens method"
+      );
+    }),
+  },
+
+  {
+    name: "transaction id is preserved after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "test", "value");
+      const originalId = entry.transaction.id;
+      yield* storage.append("tx-id-preserve", entry);
+      const entries = yield* storage.getEntries("tx-id-preserve", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      yield* assertEqual(
+        entries[0]!.transaction.id,
+        originalId,
+        "Transaction id should be preserved"
+      );
+    }),
+  },
+
+  {
+    name: "transaction timestamp is preserved after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry = makeEntryWithPath(1, "test", "value");
+      const originalTimestamp = entry.transaction.timestamp;
+      yield* storage.append("tx-timestamp-preserve", entry);
+      const entries = yield* storage.getEntries("tx-timestamp-preserve", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      yield* assertEqual(
+        entries[0]!.transaction.timestamp,
+        originalTimestamp,
+        "Transaction timestamp should be preserved"
+      );
+    }),
+  },
+
+  {
+    name: "operation kind is preserved after roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const entry: WalEntry = {
+        transaction: Transaction.make([
+          Operation.fromDefinition(OperationPath.make("data"), CustomOpDefinition, "test"),
+        ]),
+        version: 1,
+        timestamp: Date.now(),
+      };
+      yield* storage.append("op-kind-preserve", entry);
+      const entries = yield* storage.getEntries("op-kind-preserve", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      yield* assertEqual(
+        entries[0]!.transaction.ops[0]!.kind,
+        "custom.operation",
+        "Operation kind should be preserved"
+      );
+    }),
+  },
+
+  {
+    name: "operation payload with complex object survives roundtrip",
+    category: Categories.TransactionEncoding,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      const complexPayload = {
+        nested: { value: 42, array: [1, 2, 3] },
+        nullValue: null,
+        string: "test",
+      };
+      const entry = makeEntryWithPath(1, "data", complexPayload);
+      yield* storage.append("complex-payload", entry);
+      const entries = yield* storage.getEntries("complex-payload", 0);
+      yield* assertLength(entries, 1, "Should have one entry");
+      yield* assertEqual(
+        entries[0]!.transaction.ops[0]!.payload,
+        complexPayload,
+        "Complex payload should survive roundtrip"
+      );
     }),
   },
 ];

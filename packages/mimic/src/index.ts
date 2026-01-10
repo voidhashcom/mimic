@@ -6,6 +6,7 @@ export * as Primitive from "./Primitive";
 export * as Document from "./Document";
 export * as Transaction from "./Transaction";
 export * as Operation from "./Operation";
+export * as OperationDefinition from "./OperationDefinition";
 export * as OperationPath from "./OperationPath";
 export * as ProxyEnvironment from "./ProxyEnvironment";
 export * as Transform from "./Transform";

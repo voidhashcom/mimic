@@ -25,7 +25,8 @@
  * });
  * ```
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+import { Transaction, OperationPath, Operation, OperationDefinition } from "@voidhash/mimic";
 import { ColdStorageTag } from "../ColdStorage";
 import { HotStorageTag } from "../HotStorage";
 import { ColdStorageError, HotStorageError } from "../Errors";
@@ -48,7 +49,22 @@ export const Categories = {
   SNAPSHOT_WAL_COORDINATION: "Snapshot + WAL Coordination",
   VERSION_VERIFICATION: "Version Verification",
   RECOVERY_SCENARIOS: "Recovery Scenarios",
+  TRANSACTION_ENCODING: "Transaction Encoding",
 } as const;
+
+// =============================================================================
+// Test Operation Definitions
+// =============================================================================
+
+/**
+ * Test operation definition for creating proper Operation objects in tests.
+ */
+const TestSetDefinition = OperationDefinition.make({
+  kind: "test.set" as const,
+  payload: Schema.Unknown,
+  target: Schema.Unknown,
+  apply: (payload: unknown) => payload,
+});
 
 // =============================================================================
 // Test Helpers
@@ -66,13 +82,12 @@ const makeSnapshot = (
 
 const makeWalEntry = (
   version: number,
-  ops: unknown[] = [{ type: "set", path: ["data"], value: `v${version}` }]
+  pathString: string = "data",
+  payload: unknown = `v${version}`
 ): WalEntry => ({
-  transaction: {
-    id: `tx-${version}`,
-    ops,
-    timestamp: Date.now(),
-  },
+  transaction: Transaction.make([
+    Operation.fromDefinition(OperationPath.make(pathString), TestSetDefinition, payload),
+  ]),
   version,
   timestamp: Date.now(),
 });
@@ -457,6 +472,222 @@ const recoveryScenarioTests: IntegrationTestCase[] = [
   },
 ];
 
+const transactionEncodingTests: IntegrationTestCase[] = [
+  {
+    name: "OperationPath survives full recovery cycle (snapshot + WAL)",
+    category: Categories.TRANSACTION_ENCODING,
+    run: Effect.gen(function* () {
+      const cold = yield* ColdStorageTag;
+      const hot = yield* HotStorageTag;
+
+      const docId = "op-path-recovery";
+
+      // Save snapshot at v3
+      yield* cold.save(docId, makeSnapshot(3, { count: 3 }));
+
+      // Add WAL entries with proper OperationPath
+      yield* hot.append(docId, makeWalEntry(4, "users/0/name", "Alice"));
+      yield* hot.append(docId, makeWalEntry(5, "users/1/name", "Bob"));
+
+      // Simulate recovery
+      const snapshot = yield* cold.load(docId);
+      const walEntries = yield* hot.getEntries(docId, snapshot!.version);
+
+      assertLength(walEntries, 2, "Should have 2 WAL entries");
+
+      // Verify OperationPath is properly reconstructed
+      const firstOp = walEntries[0]!.transaction.ops[0]!;
+      const secondOp = walEntries[1]!.transaction.ops[0]!;
+
+      assertTrue(
+        firstOp.path._tag === "OperationPath",
+        "First op path should be OperationPath"
+      );
+      assertTrue(
+        typeof firstOp.path.toTokens === "function",
+        "First op path should have toTokens method"
+      );
+      assertEqual(
+        firstOp.path.toTokens(),
+        ["users", "0", "name"],
+        "First op path tokens should be correct"
+      );
+      assertEqual(
+        secondOp.path.toTokens(),
+        ["users", "1", "name"],
+        "Second op path tokens should be correct"
+      );
+    }),
+  },
+
+  {
+    name: "OperationPath methods work after WAL-only recovery",
+    category: Categories.TRANSACTION_ENCODING,
+    run: Effect.gen(function* () {
+      const cold = yield* ColdStorageTag;
+      const hot = yield* HotStorageTag;
+
+      const docId = "op-path-wal-only";
+
+      // No snapshot, only WAL
+      yield* hot.append(docId, makeWalEntry(1, "config/theme", "dark"));
+      yield* hot.append(docId, makeWalEntry(2, "config/language", "en"));
+
+      const snapshot = yield* cold.load(docId);
+      assertUndefined(snapshot, "No snapshot should exist");
+
+      const walEntries = yield* hot.getEntries(docId, 0);
+      assertLength(walEntries, 2, "Should have 2 WAL entries");
+
+      // Test OperationPath methods
+      const path = walEntries[0]!.transaction.ops[0]!.path;
+
+      // Test concat
+      const extended = path.concat(OperationPath.make("subkey"));
+      assertEqual(
+        extended.toTokens(),
+        ["config", "theme", "subkey"],
+        "concat should work"
+      );
+
+      // Test pop
+      const popped = path.pop();
+      assertEqual(popped.toTokens(), ["config"], "pop should work");
+
+      // Test append
+      const appended = path.append("extra");
+      assertEqual(
+        appended.toTokens(),
+        ["config", "theme", "extra"],
+        "append should work"
+      );
+    }),
+  },
+
+  {
+    name: "transaction encoding survives truncation cycle",
+    category: Categories.TRANSACTION_ENCODING,
+    run: Effect.gen(function* () {
+      const cold = yield* ColdStorageTag;
+      const hot = yield* HotStorageTag;
+
+      const docId = "op-path-truncate-cycle";
+
+      // Add WAL entries 1-5
+      for (let i = 1; i <= 5; i++) {
+        yield* hot.append(docId, makeWalEntry(i, `path/${i}`, `value${i}`));
+      }
+
+      // Save snapshot at v3 and truncate
+      yield* cold.save(docId, makeSnapshot(3));
+      yield* hot.truncate(docId, 3);
+
+      // Verify remaining entries have proper OperationPath
+      const walEntries = yield* hot.getEntries(docId, 0);
+      assertLength(walEntries, 2, "Should have versions 4 and 5");
+
+      for (const entry of walEntries) {
+        const op = entry.transaction.ops[0]!;
+        assertTrue(
+          op.path._tag === "OperationPath",
+          "Path should be OperationPath after truncation"
+        );
+        assertTrue(
+          typeof op.path.toTokens === "function",
+          "Path should have toTokens method after truncation"
+        );
+      }
+
+      assertEqual(
+        walEntries[0]!.transaction.ops[0]!.path.toTokens(),
+        ["path", "4"],
+        "Version 4 path should be correct"
+      );
+      assertEqual(
+        walEntries[1]!.transaction.ops[0]!.path.toTokens(),
+        ["path", "5"],
+        "Version 5 path should be correct"
+      );
+    }),
+  },
+
+  {
+    name: "complex nested paths survive integration roundtrip",
+    category: Categories.TRANSACTION_ENCODING,
+    run: Effect.gen(function* () {
+      const hot = yield* HotStorageTag;
+
+      const docId = "complex-nested-paths";
+
+      const complexPath = "documents/users/0/profile/settings/notifications";
+      yield* hot.append(docId, makeWalEntry(1, complexPath, { enabled: true }));
+
+      const entries = yield* hot.getEntries(docId, 0);
+      assertLength(entries, 1, "Should have one entry");
+
+      const op = entries[0]!.transaction.ops[0]!;
+      assertEqual(
+        op.path.toTokens(),
+        ["documents", "users", "0", "profile", "settings", "notifications"],
+        "Complex nested path should survive roundtrip"
+      );
+
+      // Test that path operations work on complex paths
+      const shifted = op.path.shift();
+      assertEqual(
+        shifted.toTokens(),
+        ["users", "0", "profile", "settings", "notifications"],
+        "shift should work on complex path"
+      );
+    }),
+  },
+
+  {
+    name: "multiple operations per transaction preserve all OperationPaths",
+    category: Categories.TRANSACTION_ENCODING,
+    run: Effect.gen(function* () {
+      const hot = yield* HotStorageTag;
+
+      const docId = "multi-op-integration";
+
+      const entry: WalEntry = {
+        transaction: Transaction.make([
+          Operation.fromDefinition(OperationPath.make("users/0"), TestSetDefinition, { name: "Alice" }),
+          Operation.fromDefinition(OperationPath.make("users/1"), TestSetDefinition, { name: "Bob" }),
+          Operation.fromDefinition(OperationPath.make("meta/count"), TestSetDefinition, 2),
+        ]),
+        version: 1,
+        timestamp: Date.now(),
+      };
+
+      yield* hot.append(docId, entry);
+
+      const entries = yield* hot.getEntries(docId, 0);
+      assertLength(entries, 1, "Should have one entry");
+
+      const ops = entries[0]!.transaction.ops;
+      assertEqual(ops.length, 3, "Should have 3 operations");
+
+      // Verify all paths
+      assertEqual(ops[0]!.path.toTokens(), ["users", "0"], "First path correct");
+      assertEqual(ops[1]!.path.toTokens(), ["users", "1"], "Second path correct");
+      assertEqual(ops[2]!.path.toTokens(), ["meta", "count"], "Third path correct");
+
+      // Verify all have methods
+      for (const op of ops) {
+        assertTrue(
+          typeof op.path.concat === "function",
+          "Each path should have concat method"
+        );
+        assertTrue(
+          typeof op.path.append === "function",
+          "Each path should have append method"
+        );
+      }
+    }),
+  },
+];
+
 // =============================================================================
 // Test Suite Export
 // =============================================================================
@@ -468,6 +699,7 @@ export const makeTests = (): IntegrationTestCase[] => [
   ...snapshotWalCoordinationTests,
   ...versionVerificationTests,
   ...recoveryScenarioTests,
+  ...transactionEncodingTests,
 ];
 
 /**

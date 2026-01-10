@@ -18,7 +18,7 @@
 import { Effect, Layer, Ref, HashMap } from "effect";
 import { ColdStorageTag, type ColdStorage } from "../ColdStorage";
 import { HotStorageTag, type HotStorage } from "../HotStorage";
-import { ColdStorageError, HotStorageError } from "../Errors";
+import { ColdStorageError, HotStorageError, WalVersionGapError } from "../Errors";
 import type { StoredDocument, WalEntry } from "../Types";
 
 // =============================================================================
@@ -222,6 +222,58 @@ export const makeHotStorage = (
               const entries = current._tag === "Some" ? current.value : [];
               return HashMap.set(map, documentId, [...entries, entry]);
             });
+          }),
+
+        appendWithCheck: (documentId, entry, expectedVersion) =>
+          Effect.gen(function* () {
+            const fail = yield* shouldFail("append");
+            if (fail) {
+              return yield* Effect.fail(
+                new HotStorageError({
+                  documentId,
+                  operation: "appendWithCheck",
+                  cause: new Error(errorMessage),
+                })
+              );
+            }
+
+            type CheckResult =
+              | { type: "ok" }
+              | { type: "gap"; lastVersion: number | undefined };
+
+            const result: CheckResult = yield* Ref.modify(store, (map): [CheckResult, HashMap.HashMap<string, WalEntry[]>] => {
+              const existing = HashMap.get(map, documentId);
+              const entries = existing._tag === "Some" ? existing.value : [];
+
+              const lastVersion = entries.length > 0
+                ? Math.max(...entries.map((e) => e.version))
+                : 0;
+
+              if (expectedVersion === 1) {
+                if (lastVersion >= 1) {
+                  return [{ type: "gap", lastVersion }, map];
+                }
+              } else {
+                if (lastVersion !== expectedVersion - 1) {
+                  return [{ type: "gap", lastVersion: lastVersion > 0 ? lastVersion : undefined }, map];
+                }
+              }
+
+              return [
+                { type: "ok" },
+                HashMap.set(map, documentId, [...entries, entry]),
+              ];
+            });
+
+            if (result.type === "gap") {
+              return yield* Effect.fail(
+                new WalVersionGapError({
+                  documentId,
+                  expectedVersion,
+                  actualPreviousVersion: result.lastVersion,
+                })
+              );
+            }
           }),
 
         getEntries: (documentId, sinceVersion) =>
