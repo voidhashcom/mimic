@@ -5,7 +5,7 @@
  */
 import { Context, Effect, HashMap, Layer, Ref } from "effect";
 import type { WalEntry } from "./Types";
-import { HotStorageError } from "./Errors";
+import { HotStorageError, WalVersionGapError } from "./Errors";
 
 // =============================================================================
 // HotStorage Interface
@@ -26,6 +26,27 @@ export interface HotStorage {
     documentId: string,
     entry: WalEntry
   ) => Effect.Effect<void, HotStorageError>;
+
+  /**
+   * Append a WAL entry with version gap checking.
+   *
+   * This is an atomic operation that:
+   * 1. Verifies the previous entry has version = expectedVersion - 1
+   *    (or this is the first entry if expectedVersion === 1)
+   * 2. Appends the entry if check passes
+   *
+   * Use this for two-phase commit to guarantee WAL ordering at write time.
+   *
+   * @param documentId - Document ID
+   * @param entry - WAL entry to append
+   * @param expectedVersion - The version this entry should have (entry.version)
+   * @returns Effect that fails with WalVersionGapError if gap detected
+   */
+  readonly appendWithCheck: (
+    documentId: string,
+    entry: WalEntry,
+    expectedVersion: number
+  ) => Effect.Effect<void, HotStorageError | WalVersionGapError>;
 
   /**
    * Get all WAL entries for a document since a given version.
@@ -125,6 +146,59 @@ export namespace InMemory {
               const entries =
                 existing._tag === "Some" ? existing.value : [];
               return HashMap.set(map, documentId, [...entries, entry]);
+            }),
+
+          appendWithCheck: (documentId, entry, expectedVersion) =>
+            Effect.gen(function* () {
+              type CheckResult =
+                | { type: "ok" }
+                | { type: "gap"; lastVersion: number | undefined };
+
+              // Use Ref.modify for atomic check + update
+              const result: CheckResult = yield* Ref.modify(store, (map): [CheckResult, HashMap.HashMap<string, WalEntry[]>] => {
+                const existing = HashMap.get(map, documentId);
+                const entries = existing._tag === "Some" ? existing.value : [];
+
+                // Find the highest version in existing entries
+                const lastVersion = entries.length > 0
+                  ? Math.max(...entries.map((e) => e.version))
+                  : 0;
+
+                // Gap check
+                if (expectedVersion === 1) {
+                  // First entry: should have no entries with version >= 1
+                  if (lastVersion >= 1) {
+                    return [
+                      { type: "gap", lastVersion },
+                      map,
+                    ];
+                  }
+                } else {
+                  // Not first: last entry should have version = expectedVersion - 1
+                  if (lastVersion !== expectedVersion - 1) {
+                    return [
+                      { type: "gap", lastVersion: lastVersion > 0 ? lastVersion : undefined },
+                      map,
+                    ];
+                  }
+                }
+
+                // No gap: append and return success
+                return [
+                  { type: "ok" },
+                  HashMap.set(map, documentId, [...entries, entry]),
+                ];
+              });
+
+              if (result.type === "gap") {
+                return yield* Effect.fail(
+                  new WalVersionGapError({
+                    documentId,
+                    expectedVersion,
+                    actualPreviousVersion: result.lastVersion,
+                  })
+                );
+              }
             }),
 
           getEntries: (documentId, sinceVersion) =>
