@@ -222,7 +222,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
   return Layer.scoped(
     MimicServerEngineTag,
-    Effect.gen(function* () {
+    Effect.fn("mimic-server-engine.make")(function* () {
       const documentManager = yield* DocumentManagerTag;
       const presenceManager = yield* PresenceManagerTag;
 
@@ -256,7 +256,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       };
 
       return engine;
-    })
+    })()
   ).pipe(Layer.provide(internalLayers));
 };
 

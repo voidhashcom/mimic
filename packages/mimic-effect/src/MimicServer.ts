@@ -10,7 +10,6 @@ import {
   Fiber,
   Layer,
   Metric,
-  Scope,
   Stream,
 } from "effect";
 import {
@@ -93,14 +92,14 @@ interface ConnectionState {
 /**
  * Handle a WebSocket connection for a document.
  */
-const handleWebSocketConnection = (
-  socket: Socket.Socket,
-  documentId: string,
-  engine: MimicServerEngine,
-  authService: MimicAuthService,
-  _routeConfig: ResolvedRouteConfig
-): Effect.Effect<void, Socket.SocketError, Scope.Scope> =>
-  Effect.gen(function* () {
+const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
+  function* (
+    socket: Socket.Socket,
+    documentId: string,
+    engine: MimicServerEngine,
+    authService: MimicAuthService,
+    _routeConfig: ResolvedRouteConfig
+  ) {
     const connectionId = crypto.randomUUID();
     const connectionStartTime = Date.now();
 
@@ -124,59 +123,62 @@ const handleWebSocketConnection = (
       write(Protocol.encodeServerMessage(message));
 
     // Send presence snapshot after auth
-    const sendPresenceSnapshot = Effect.gen(function* () {
-      if (!engine.config.presence) return;
+    const sendPresenceSnapshot = Effect.fn("presence.snapshot.send")(
+      function* () {
+        if (!engine.config.presence) return;
 
-      const snapshot = yield* engine.getPresenceSnapshot(documentId);
-      yield* sendMessage(
-        Protocol.presenceSnapshotMessage(connectionId, snapshot.presences)
-      );
-    });
+        const snapshot = yield* engine.getPresenceSnapshot(documentId);
+        yield* sendMessage(
+          Protocol.presenceSnapshotMessage(connectionId, snapshot.presences)
+        );
+      }
+    );
 
     // Send document snapshot after auth
-    const sendDocumentSnapshot = Effect.gen(function* () {
-      const snapshot = yield* engine.getSnapshot(documentId);
-      yield* sendMessage(
-        Protocol.snapshotMessage(snapshot.state, snapshot.version)
-      );
-    });
+    const sendDocumentSnapshot = Effect.fn("document.snapshot.send")(
+      function* () {
+        const snapshot = yield* engine.getSnapshot(documentId);
+        yield* sendMessage(
+          Protocol.snapshotMessage(snapshot.state, snapshot.version)
+        );
+      }
+    );
 
     // Handle authentication
-    const handleAuth = (token: string) =>
-      Effect.gen(function* () {
-        const result = yield* Effect.either(
-          authService.authenticate(token, documentId)
+    const handleAuth = Effect.fn("auth.handle")(function* (token: string) {
+      const result = yield* Effect.either(
+        authService.authenticate(token, documentId)
+      );
+
+      if (result._tag === "Right") {
+        state.authenticated = true;
+        state.authContext = result.right;
+
+        yield* sendMessage(
+          Protocol.authResultSuccess(
+            result.right.userId,
+            result.right.permission
+          )
         );
 
-        if (result._tag === "Right") {
-          state.authenticated = true;
-          state.authContext = result.right;
+        // Send document snapshot after successful auth
+        yield* sendDocumentSnapshot();
 
-          yield* sendMessage(
-            Protocol.authResultSuccess(
-              result.right.userId,
-              result.right.permission
-            )
-          );
-
-          // Send document snapshot after successful auth
-          yield* sendDocumentSnapshot;
-
-          // Send presence snapshot after successful auth
-          yield* sendPresenceSnapshot;
-        } else {
-          yield* Metric.increment(Metrics.connectionsErrors);
-          yield* sendMessage(
-            Protocol.authResultFailure(
-              result.left.reason ?? "Authentication failed"
-            )
-          );
-        }
-      });
+        // Send presence snapshot after successful auth
+        yield* sendPresenceSnapshot();
+      } else {
+        yield* Metric.increment(Metrics.connectionsErrors);
+        yield* sendMessage(
+          Protocol.authResultFailure(
+            result.left.reason ?? "Authentication failed"
+          )
+        );
+      }
+    });
 
     // Handle presence set
-    const handlePresenceSet = (data: unknown) =>
-      Effect.gen(function* () {
+    const handlePresenceSet = Effect.fn("presence.set.handle")(
+      function* (data: unknown) {
         if (!state.authenticated) return;
         if (!state.authContext) return;
         if (!engine.config.presence) return;
@@ -206,20 +208,23 @@ const handleWebSocketConnection = (
         });
 
         state.hasPresence = true;
-      });
+      }
+    );
 
     // Handle presence clear
-    const handlePresenceClear = Effect.gen(function* () {
-      if (!state.authenticated) return;
-      if (!engine.config.presence) return;
+    const handlePresenceClear = Effect.fn("presence.clear.handle")(
+      function* () {
+        if (!state.authenticated) return;
+        if (!engine.config.presence) return;
 
-      yield* engine.removePresence(documentId, connectionId);
-      state.hasPresence = false;
-    });
+        yield* engine.removePresence(documentId, connectionId);
+        state.hasPresence = false;
+      }
+    );
 
     // Handle a client message
-    const handleMessage = (message: Protocol.ClientMessage) =>
-      Effect.gen(function* () {
+    const handleMessage = Effect.fn("message.handle")(
+      function* (message: Protocol.ClientMessage) {
         // Touch document on any activity (prevents idle GC)
         yield* engine.touch(documentId);
 
@@ -283,14 +288,15 @@ const handleWebSocketConnection = (
             break;
 
           case "presence_clear":
-            yield* handlePresenceClear;
+            yield* handlePresenceClear();
             break;
         }
-      });
+      }
+    );
 
     // Subscribe to document broadcasts
     const subscribeFiber = yield* Effect.fork(
-      Effect.gen(function* () {
+      Effect.fn("subscriptions.document.start")(function* () {
         // Wait until authenticated before subscribing
         while (!state.authenticated) {
           yield* Effect.sleep(Duration.millis(100));
@@ -303,12 +309,12 @@ const handleWebSocketConnection = (
         yield* Stream.runForEach(broadcastStream, (broadcast) =>
           sendMessage(broadcast as Protocol.ServerMessage)
         );
-      }).pipe(Effect.scoped)
+      })().pipe(Effect.scoped)
     );
 
     // Subscribe to presence events (if presence is enabled)
     const presenceFiber = yield* Effect.fork(
-      Effect.gen(function* () {
+      Effect.fn("subscriptions.presence.start")(function* () {
         if (!engine.config.presence) return;
 
         // Wait until authenticated before subscribing
@@ -334,12 +340,12 @@ const handleWebSocketConnection = (
             }
           })
         );
-      }).pipe(Effect.scoped)
+      })().pipe(Effect.scoped)
     );
 
     // Ensure cleanup on disconnect
     yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
+      Effect.fn("connection.cleanup")(function* () {
         // Calculate connection duration
         const duration = Date.now() - connectionStartTime;
 
@@ -361,21 +367,22 @@ const handleWebSocketConnection = (
           documentId,
           durationMs: duration,
         });
-      })
+      })()
     );
 
     // Process incoming messages
     yield* socket.runRaw((data) =>
-      Effect.gen(function* () {
+      Effect.fn("message.process")(function* () {
         const message = yield* Protocol.parseClientMessage(data);
         yield* handleMessage(message);
-      }).pipe(
+      })().pipe(
         Effect.catchAll((error) =>
           Effect.logError("Message handling error", error)
         )
       )
     );
-  });
+  }
+);
 
 // =============================================================================
 // Factory
@@ -437,8 +444,8 @@ export const layerHttpLayerRouter = (
 
       // Create the handler that receives the request
       // Engine and authService are captured in closure, not yielded per-request
-      const handler = (request: HttpServerRequest.HttpServerRequest) =>
-        Effect.gen(function* () {
+      const handler = Effect.fn("websocket.route.handler")(
+        function* (request: HttpServerRequest.HttpServerRequest) {
           // Extract document ID from path
           const documentIdResult = yield* Effect.either(
             extractDocumentId(request.url)
@@ -470,7 +477,8 @@ export const layerHttpLayerRouter = (
 
           // Return empty response - the WebSocket upgrade handles the connection
           return HttpServerResponse.empty();
-        });
+        }
+      );
 
       yield* router.add("GET", routePath, handler);
     })

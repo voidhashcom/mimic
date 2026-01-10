@@ -104,24 +104,33 @@ export namespace InMemory {
   export const make = (): Layer.Layer<ColdStorageTag> =>
     Layer.effect(
       ColdStorageTag,
-      Effect.gen(function* () {
+      Effect.fn("cold-storage.in-memory.create")(function* () {
         const store = yield* Ref.make(HashMap.empty<string, StoredDocument>());
 
         return {
-          load: (documentId) =>
-            Effect.gen(function* () {
-              const current = yield* Ref.get(store);
-              const result = HashMap.get(current, documentId);
-              return result._tag === "Some" ? result.value : undefined;
-            }),
+          load: Effect.fn("cold-storage.load")(function* (documentId: string) {
+            const current = yield* Ref.get(store);
+            const result = HashMap.get(current, documentId);
+            return result._tag === "Some" ? result.value : undefined;
+          }),
 
-          save: (documentId, document) =>
-            Ref.update(store, (map) => HashMap.set(map, documentId, document)),
+          save: Effect.fn("cold-storage.save")(
+            function* (documentId: string, document: StoredDocument) {
+              yield* Ref.update(store, (map) =>
+                HashMap.set(map, documentId, document)
+              );
+            }
+          ),
 
-          delete: (documentId) =>
-            Ref.update(store, (map) => HashMap.remove(map, documentId)),
+          delete: Effect.fn("cold-storage.delete")(
+            function* (documentId: string) {
+              yield* Ref.update(store, (map) =>
+                HashMap.remove(map, documentId)
+              );
+            }
+          ),
         };
-      })
+      })()
     );
 }
 

@@ -176,10 +176,8 @@ export const layer = Layer.scoped(
     /**
      * Restore a document from storage
      */
-    const restoreDocument = (
-      documentId: string
-    ): Effect.Effect<DocumentInstance<typeof config.schema>, ColdStorageError | HotStorageError> =>
-      Effect.gen(function* () {
+    const restoreDocument = Effect.fn("document.restore")(
+      function* (documentId: string) {
         // 1. Load snapshot from ColdStorage (errors propagate - do not silently fallback)
         const storedDoc = yield* coldStorage.load(documentId);
 
@@ -294,15 +292,14 @@ export const layer = Layer.scoped(
         yield* Metric.incrementBy(Metrics.documentsActive, 1);
 
         return instance;
-      });
+      }
+    );
 
     /**
      * Get or create a document instance
      */
-    const getOrCreateDocument = (
-      documentId: string
-    ): Effect.Effect<DocumentInstance<typeof config.schema>, ColdStorageError | HotStorageError> =>
-      Effect.gen(function* () {
+    const getOrCreateDocument = Effect.fn("document.get-or-create")(
+      function* (documentId: string) {
         const current = yield* Ref.get(store);
         const existing = HashMap.get(current, documentId);
 
@@ -321,7 +318,8 @@ export const layer = Layer.scoped(
         );
 
         return instance;
-      });
+      }
+    );
 
     /**
      * Save a snapshot to ColdStorage derived from WAL entries.
@@ -329,12 +327,12 @@ export const layer = Layer.scoped(
      * Idempotent: skips save if already snapshotted at target version.
      * Truncate failures are non-fatal and will be retried on next snapshot.
      */
-    const saveSnapshot = (
-      documentId: string,
-      instance: DocumentInstance<typeof config.schema>,
-      targetVersion: number
-    ): Effect.Effect<void, ColdStorageError | HotStorageError> =>
-      Effect.gen(function* () {
+    const saveSnapshot = Effect.fn("document.snapshot.save")(
+      function* (
+        documentId: string,
+        instance: DocumentInstance<typeof config.schema>,
+        targetVersion: number
+      ) {
         const lastSnapshotVersion = yield* Ref.get(instance.lastSnapshotVersion);
 
         // Idempotency check: skip if already snapshotted at this version
@@ -410,16 +408,17 @@ export const layer = Layer.scoped(
             error: e,
           })
         );
-      });
+      }
+    );
 
     /**
      * Check if snapshot should be triggered
      */
-    const checkSnapshotTriggers = (
-      documentId: string,
-      instance: DocumentInstance<typeof config.schema>
-    ): Effect.Effect<void, ColdStorageError | HotStorageError> =>
-      Effect.gen(function* () {
+    const checkSnapshotTriggers = Effect.fn("document.snapshot.check-triggers")(
+      function* (
+        documentId: string,
+        instance: DocumentInstance<typeof config.schema>
+      ) {
         const txCount = yield* Ref.get(instance.transactionsSinceSnapshot);
         const lastTime = yield* Ref.get(instance.lastSnapshotTime);
         const now = Date.now();
@@ -439,13 +438,14 @@ export const layer = Layer.scoped(
           yield* saveSnapshot(documentId, instance, currentVersion);
           return;
         }
-      });
+      }
+    );
 
     /**
      * Start background GC fiber
      */
-    const startGCFiber = Effect.gen(function* () {
-      const gcLoop = Effect.gen(function* () {
+    const startGCFiber = Effect.fn("document.gc.start")(function* () {
+      const gcLoop = Effect.fn("document.gc.loop")(function* () {
         const current = yield* Ref.get(store);
         const now = Date.now();
         const maxIdleMs = Duration.toMillis(config.maxIdleTime);
@@ -477,18 +477,18 @@ export const layer = Layer.scoped(
       });
 
       // Run GC every minute
-      yield* gcLoop.pipe(
+      yield* gcLoop().pipe(
         Effect.repeat(Schedule.spaced("1 minute")),
         Effect.fork
       );
     });
 
     // Start GC fiber
-    yield* startGCFiber;
+    yield* startGCFiber();
 
     // Cleanup on shutdown
     yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
+      Effect.fn("document-manager.shutdown")(function* () {
         const current = yield* Ref.get(store);
         for (const [documentId, instance] of current) {
           // Best effort save - don't fail shutdown if storage is unavailable
@@ -501,12 +501,12 @@ export const layer = Layer.scoped(
           );
         }
         yield* Effect.logInfo("DocumentManager shutdown complete");
-      })
+      })()
     );
 
     return {
-      submit: (documentId, transaction) =>
-        Effect.gen(function* () {
+      submit: Effect.fn("document.transaction.submit")(
+        function* (documentId: string, transaction: Transaction.Transaction) {
           const instance = yield* getOrCreateDocument(documentId);
           const submitStartTime = Date.now();
 
@@ -577,28 +577,30 @@ export const layer = Layer.scoped(
             success: true as const,
             version: validation.nextVersion,
           };
-        }),
+        }
+      ),
 
-      getSnapshot: (documentId) =>
-        Effect.gen(function* () {
+      getSnapshot: Effect.fn("document.snapshot.get")(
+        function* (documentId: string) {
           const instance = yield* getOrCreateDocument(documentId);
           return instance.document.getSnapshot();
-        }),
+        }
+      ),
 
-      subscribe: (documentId) =>
-        Effect.gen(function* () {
+      subscribe: Effect.fn("document.subscribe")(
+        function* (documentId: string) {
           const instance = yield* getOrCreateDocument(documentId);
           return Stream.fromPubSub(instance.pubsub);
-        }),
+        }
+      ),
 
-      touch: (documentId) =>
-        Effect.gen(function* () {
-          const current = yield* Ref.get(store);
-          const existing = HashMap.get(current, documentId);
-          if (existing._tag === "Some") {
-            yield* Ref.set(existing.value.lastActivityTime, Date.now());
-          }
-        }),
+      touch: Effect.fn("document.touch")(function* (documentId: string) {
+        const current = yield* Ref.get(store);
+        const existing = HashMap.get(current, documentId);
+        if (existing._tag === "Some") {
+          yield* Ref.set(existing.value.lastActivityTime, Date.now());
+        }
+      }),
     };
   })
 );

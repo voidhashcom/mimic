@@ -257,7 +257,7 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
   coldStorage: ColdStorage,
   hotStorage: HotStorage
 ) =>
-  Effect.gen(function* () {
+  Effect.fn("cluster.entity.handler.create")(function* () {
     // Get entity address to determine documentId
     const address = yield* Entity.CurrentAddress;
     const documentId = address.entityId;
@@ -406,7 +406,8 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
      * Idempotent: skips save if already snapshotted at target version.
      * Truncate failures are non-fatal and will be retried on next snapshot.
      */
-    const saveSnapshot = (targetVersion: number) => Effect.gen(function* () {
+    const saveSnapshot = Effect.fn("cluster.document.snapshot.save")(
+      function* (targetVersion: number) {
       const state = yield* Ref.get(stateRef);
 
       // Idempotency check: skip if already snapshotted at this version
@@ -504,12 +505,15 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
           error: e,
         })
       );
-    });
+      }
+    );
 
     /**
      * Check if snapshot should be triggered
      */
-    const checkSnapshotTriggers = Effect.gen(function* () {
+    const checkSnapshotTriggers = Effect.fn(
+      "cluster.document.snapshot.check-triggers"
+    )(function* () {
       const state = yield* Ref.get(stateRef);
       const now = Date.now();
       const currentVersion = state.document.getVersion();
@@ -530,7 +534,7 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
 
     // Cleanup on entity finalization
     yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
+      Effect.fn("cluster.entity.finalize")(function* () {
         // Save final snapshot before entity is garbage collected
         const state = yield* Ref.get(stateRef);
         const currentVersion = state.document.getVersion();
@@ -538,12 +542,14 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
         yield* Metric.incrementBy(Metrics.documentsActive, -1);
         yield* Metric.increment(Metrics.documentsEvicted);
         yield* Effect.logDebug("Entity finalized", { documentId });
-      })
+      })()
     );
 
     // Return RPC handlers
     return {
-      Submit: Effect.fnUntraced(function* ({ payload }) {
+      Submit: Effect.fn("cluster.document.transaction.submit")(function* ({
+        payload,
+      }) {
         const submitStartTime = Date.now();
         const state = yield* Ref.get(stateRef);
 
@@ -611,7 +617,7 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
         }));
 
         // Check snapshot triggers
-        yield* checkSnapshotTriggers;
+        yield* checkSnapshotTriggers();
 
         return {
           success: true as const,
@@ -619,18 +625,18 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
         };
       }),
 
-      GetSnapshot: Effect.fnUntraced(function* () {
+      GetSnapshot: Effect.fn("cluster.document.snapshot.get")(function* () {
         const state = yield* Ref.get(stateRef);
         return state.document.getSnapshot();
       }),
 
-      Touch: Effect.fnUntraced(function* () {
+      Touch: Effect.fn("cluster.document.touch")(function* () {
         // Entity touch is handled automatically by the cluster framework
         // Just update last activity time conceptually
         return void 0;
       }),
 
-      SetPresence: Effect.fnUntraced(function* ({ payload }) {
+      SetPresence: Effect.fn("cluster.presence.set")(function* ({ payload }) {
         const { connectionId, entry } = payload;
 
         yield* Ref.update(stateRef, (s) => ({
@@ -651,7 +657,9 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
         yield* PubSub.publish(state.presencePubSub, event);
       }),
 
-      RemovePresence: Effect.fnUntraced(function* ({ payload }) {
+      RemovePresence: Effect.fn("cluster.presence.remove")(function* ({
+        payload,
+      }) {
         const { connectionId } = payload;
         const state = yield* Ref.get(stateRef);
 
@@ -673,16 +681,18 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
         yield* PubSub.publish(state.presencePubSub, event);
       }),
 
-      GetPresenceSnapshot: Effect.fnUntraced(function* () {
-        const state = yield* Ref.get(stateRef);
-        const presences: Record<string, PresenceEntry> = {};
-        for (const [id, entry] of state.presences) {
-          presences[id] = entry;
+      GetPresenceSnapshot: Effect.fn("cluster.presence.snapshot.get")(
+        function* () {
+          const state = yield* Ref.get(stateRef);
+          const presences: Record<string, PresenceEntry> = {};
+          for (const [id, entry] of state.presences) {
+            presences[id] = entry;
+          }
+          return { presences };
         }
-        return { presences };
-      }),
+      ),
     };
-  });
+  })();
 
 // =============================================================================
 // Subscription Store (for managing subscriptions at the gateway level)
@@ -707,7 +717,7 @@ class SubscriptionStoreTag extends Context.Tag(
 
 const subscriptionStoreLayer = Layer.effect(
   SubscriptionStoreTag,
-  Effect.gen(function* () {
+  Effect.fn("cluster.subscriptions.layer.create")(function* () {
     const documentPubSubs = yield* Ref.make(
       HashMap.empty<string, PubSub.PubSub<Protocol.ServerMessage>>()
     );
@@ -716,37 +726,39 @@ const subscriptionStoreLayer = Layer.effect(
     );
 
     return {
-      getOrCreatePubSub: (documentId: string) =>
-        Effect.gen(function* () {
-          const current = yield* Ref.get(documentPubSubs);
-          const existing = HashMap.get(current, documentId);
-          if (existing._tag === "Some") {
-            return existing.value;
-          }
+      getOrCreatePubSub: Effect.fn(
+        "cluster.subscriptions.pubsub.get-or-create"
+      )(function* (documentId: string) {
+        const current = yield* Ref.get(documentPubSubs);
+        const existing = HashMap.get(current, documentId);
+        if (existing._tag === "Some") {
+          return existing.value;
+        }
 
-          const pubsub = yield* PubSub.unbounded<Protocol.ServerMessage>();
-          yield* Ref.update(documentPubSubs, (map) =>
-            HashMap.set(map, documentId, pubsub)
-          );
-          return pubsub;
-        }),
+        const pubsub = yield* PubSub.unbounded<Protocol.ServerMessage>();
+        yield* Ref.update(documentPubSubs, (map) =>
+          HashMap.set(map, documentId, pubsub)
+        );
+        return pubsub;
+      }),
 
-      getOrCreatePresencePubSub: (documentId: string) =>
-        Effect.gen(function* () {
-          const current = yield* Ref.get(presencePubSubs);
-          const existing = HashMap.get(current, documentId);
-          if (existing._tag === "Some") {
-            return existing.value;
-          }
+      getOrCreatePresencePubSub: Effect.fn(
+        "cluster.subscriptions.presence-pubsub.get-or-create"
+      )(function* (documentId: string) {
+        const current = yield* Ref.get(presencePubSubs);
+        const existing = HashMap.get(current, documentId);
+        if (existing._tag === "Some") {
+          return existing.value;
+        }
 
-          const pubsub = yield* PubSub.unbounded<PresenceEvent>();
-          yield* Ref.update(presencePubSubs, (map) =>
-            HashMap.set(map, documentId, pubsub)
-          );
-          return pubsub;
-        }),
+        const pubsub = yield* PubSub.unbounded<PresenceEvent>();
+        yield* Ref.update(presencePubSubs, (map) =>
+          HashMap.set(map, documentId, pubsub)
+        );
+        return pubsub;
+      }),
     };
-  })
+  })()
 );
 
 // =============================================================================

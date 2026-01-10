@@ -136,59 +136,71 @@ export namespace InMemory {
   export const make = (): Layer.Layer<HotStorageTag> =>
     Layer.effect(
       HotStorageTag,
-      Effect.gen(function* () {
+      Effect.fn("hot-storage.in-memory.create")(function* () {
         const store = yield* Ref.make(HashMap.empty<string, WalEntry[]>());
 
         return {
-          append: (documentId, entry) =>
-            Ref.update(store, (map) => {
-              const existing = HashMap.get(map, documentId);
-              const entries =
-                existing._tag === "Some" ? existing.value : [];
-              return HashMap.set(map, documentId, [...entries, entry]);
-            }),
+          append: Effect.fn("hot-storage.append")(
+            function* (documentId: string, entry: WalEntry) {
+              yield* Ref.update(store, (map) => {
+                const existing = HashMap.get(map, documentId);
+                const entries =
+                  existing._tag === "Some" ? existing.value : [];
+                return HashMap.set(map, documentId, [...entries, entry]);
+              });
+            }
+          ),
 
-          appendWithCheck: (documentId, entry, expectedVersion) =>
-            Effect.gen(function* () {
+          appendWithCheck: Effect.fn("hot-storage.append-with-check")(
+            function* (
+              documentId: string,
+              entry: WalEntry,
+              expectedVersion: number
+            ) {
               type CheckResult =
                 | { type: "ok" }
                 | { type: "gap"; lastVersion: number | undefined };
 
               // Use Ref.modify for atomic check + update
-              const result: CheckResult = yield* Ref.modify(store, (map): [CheckResult, HashMap.HashMap<string, WalEntry[]>] => {
-                const existing = HashMap.get(map, documentId);
-                const entries = existing._tag === "Some" ? existing.value : [];
+              const result: CheckResult = yield* Ref.modify(
+                store,
+                (map): [CheckResult, HashMap.HashMap<string, WalEntry[]>] => {
+                  const existing = HashMap.get(map, documentId);
+                  const entries =
+                    existing._tag === "Some" ? existing.value : [];
 
-                // Find the highest version in existing entries
-                const lastVersion = entries.length > 0
-                  ? Math.max(...entries.map((e) => e.version))
-                  : 0;
+                  // Find the highest version in existing entries
+                  const lastVersion =
+                    entries.length > 0
+                      ? Math.max(...entries.map((e) => e.version))
+                      : 0;
 
-                // Gap check
-                if (expectedVersion === 1) {
-                  // First entry: should have no entries with version >= 1
-                  if (lastVersion >= 1) {
-                    return [
-                      { type: "gap", lastVersion },
-                      map,
-                    ];
+                  // Gap check
+                  if (expectedVersion === 1) {
+                    // First entry: should have no entries with version >= 1
+                    if (lastVersion >= 1) {
+                      return [{ type: "gap", lastVersion }, map];
+                    }
+                  } else {
+                    // Not first: last entry should have version = expectedVersion - 1
+                    if (lastVersion !== expectedVersion - 1) {
+                      return [
+                        {
+                          type: "gap",
+                          lastVersion: lastVersion > 0 ? lastVersion : undefined,
+                        },
+                        map,
+                      ];
+                    }
                   }
-                } else {
-                  // Not first: last entry should have version = expectedVersion - 1
-                  if (lastVersion !== expectedVersion - 1) {
-                    return [
-                      { type: "gap", lastVersion: lastVersion > 0 ? lastVersion : undefined },
-                      map,
-                    ];
-                  }
+
+                  // No gap: append and return success
+                  return [
+                    { type: "ok" },
+                    HashMap.set(map, documentId, [...entries, entry]),
+                  ];
                 }
-
-                // No gap: append and return success
-                return [
-                  { type: "ok" },
-                  HashMap.set(map, documentId, [...entries, entry]),
-                ];
-              });
+              );
 
               if (result.type === "gap") {
                 return yield* Effect.fail(
@@ -199,10 +211,11 @@ export namespace InMemory {
                   })
                 );
               }
-            }),
+            }
+          ),
 
-          getEntries: (documentId, sinceVersion) =>
-            Effect.gen(function* () {
+          getEntries: Effect.fn("hot-storage.get-entries")(
+            function* (documentId: string, sinceVersion: number) {
               const current = yield* Ref.get(store);
               const existing = HashMap.get(current, documentId);
               const entries =
@@ -210,21 +223,25 @@ export namespace InMemory {
               return entries
                 .filter((e) => e.version > sinceVersion)
                 .sort((a, b) => a.version - b.version);
-            }),
+            }
+          ),
 
-          truncate: (documentId, upToVersion) =>
-            Ref.update(store, (map) => {
-              const existing = HashMap.get(map, documentId);
-              if (existing._tag === "None") {
-                return map;
-              }
-              const filtered = existing.value.filter(
-                (e) => e.version > upToVersion
-              );
-              return HashMap.set(map, documentId, filtered);
-            }),
+          truncate: Effect.fn("hot-storage.truncate")(
+            function* (documentId: string, upToVersion: number) {
+              yield* Ref.update(store, (map) => {
+                const existing = HashMap.get(map, documentId);
+                if (existing._tag === "None") {
+                  return map;
+                }
+                const filtered = existing.value.filter(
+                  (e) => e.version > upToVersion
+                );
+                return HashMap.set(map, documentId, filtered);
+              });
+            }
+          ),
         };
-      })
+      })()
     );
 }
 

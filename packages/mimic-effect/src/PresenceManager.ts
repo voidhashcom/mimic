@@ -106,30 +106,29 @@ export const layer: Layer.Layer<PresenceManagerTag> = Layer.effect(
     /**
      * Get or create presence state for a document
      */
-    const getOrCreateDocumentState = (
-      documentId: string
-    ): Effect.Effect<DocumentPresenceState> =>
-      Effect.gen(function* () {
-        const current = yield* Ref.get(store);
-        const existing = HashMap.get(current, documentId);
-        if (existing._tag === "Some") {
-          return existing.value;
-        }
+    const getOrCreateDocumentState = Effect.fn(
+      "presence.document-state.get-or-create"
+    )(function* (documentId: string) {
+      const current = yield* Ref.get(store);
+      const existing = HashMap.get(current, documentId);
+      if (existing._tag === "Some") {
+        return existing.value;
+      }
 
-        // Create new state for this document
-        const pubsub = yield* PubSub.unbounded<PresenceEvent>();
-        const state: DocumentPresenceState = {
-          presences: HashMap.empty(),
-          pubsub,
-        };
+      // Create new state for this document
+      const pubsub = yield* PubSub.unbounded<PresenceEvent>();
+      const state: DocumentPresenceState = {
+        presences: HashMap.empty(),
+        pubsub,
+      };
 
-        yield* Ref.update(store, (map) => HashMap.set(map, documentId, state));
-        return state;
-      });
+      yield* Ref.update(store, (map) => HashMap.set(map, documentId, state));
+      return state;
+    });
 
     return {
-      getSnapshot: (documentId) =>
-        Effect.gen(function* () {
+      getSnapshot: Effect.fn("presence.snapshot.get")(
+        function* (documentId: string) {
           const current = yield* Ref.get(store);
           const existing = HashMap.get(current, documentId);
           if (existing._tag === "None") {
@@ -142,10 +141,15 @@ export const layer: Layer.Layer<PresenceManagerTag> = Layer.effect(
             presences[id] = entry;
           }
           return { presences };
-        }),
+        }
+      ),
 
-      set: (documentId, connectionId, entry) =>
-        Effect.gen(function* () {
+      set: Effect.fn("presence.set")(
+        function* (
+          documentId: string,
+          connectionId: string,
+          entry: PresenceEntry
+        ) {
           const state = yield* getOrCreateDocumentState(documentId);
 
           // Update presence in store
@@ -174,16 +178,20 @@ export const layer: Layer.Layer<PresenceManagerTag> = Layer.effect(
             userId: entry.userId,
           };
           yield* PubSub.publish(state.pubsub, event);
-        }),
+        }
+      ),
 
-      remove: (documentId, connectionId) =>
-        Effect.gen(function* () {
+      remove: Effect.fn("presence.remove")(
+        function* (documentId: string, connectionId: string) {
           const current = yield* Ref.get(store);
           const existing = HashMap.get(current, documentId);
           if (existing._tag === "None") return;
 
           // Check if presence exists before removing
-          const hasPresence = HashMap.has(existing.value.presences, connectionId);
+          const hasPresence = HashMap.has(
+            existing.value.presences,
+            connectionId
+          );
           if (!hasPresence) return;
 
           // Remove presence from store
@@ -205,13 +213,15 @@ export const layer: Layer.Layer<PresenceManagerTag> = Layer.effect(
             id: connectionId,
           };
           yield* PubSub.publish(existing.value.pubsub, event);
-        }),
+        }
+      ),
 
-      subscribe: (documentId) =>
-        Effect.gen(function* () {
+      subscribe: Effect.fn("presence.subscribe")(
+        function* (documentId: string) {
           const state = yield* getOrCreateDocumentState(documentId);
           return Stream.fromPubSub(state.pubsub);
-        }),
+        }
+      ),
     };
   })
 );
