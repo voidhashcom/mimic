@@ -15,6 +15,7 @@ import {
   Metric,
   PubSub,
   Ref,
+  Schedule,
   Schema,
   Stream,
 } from "effect";
@@ -46,6 +47,7 @@ const DEFAULT_MAX_IDLE_TIME = Duration.minutes(5);
 const DEFAULT_MAX_TRANSACTION_HISTORY = 1000;
 const DEFAULT_SNAPSHOT_INTERVAL = Duration.minutes(5);
 const DEFAULT_SNAPSHOT_THRESHOLD = 100;
+const DEFAULT_SNAPSHOT_IDLE_TIMEOUT = Duration.seconds(30);
 const DEFAULT_SHARD_GROUP = "mimic-documents";
 
 // =============================================================================
@@ -209,6 +211,9 @@ const resolveClusterConfig = <TSchema extends Primitive.AnyPrimitive>(
       : DEFAULT_SNAPSHOT_INTERVAL,
     transactionThreshold:
       config.snapshot?.transactionThreshold ?? DEFAULT_SNAPSHOT_THRESHOLD,
+    idleTimeout: config.snapshot?.idleTimeout
+      ? Duration.decode(config.snapshot.idleTimeout)
+      : DEFAULT_SNAPSHOT_IDLE_TIMEOUT,
   },
   shardGroup: config.shardGroup ?? DEFAULT_SHARD_GROUP,
 });
@@ -291,6 +296,29 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
         yield* Effect.logDebug("Entity finalized", { documentId });
       })()
     );
+
+    // Start periodic snapshot fiber for this entity
+    const idleTimeoutMs = Duration.toMillis(config.snapshot.idleTimeout);
+    if (idleTimeoutMs > 0) {
+      const snapshotLoop = Effect.fn("cluster.entity.snapshot.loop")(function* () {
+        const needs = yield* instance.needsSnapshot();
+        if (needs) {
+          yield* Effect.catchAll(instance.saveSnapshot(), (e) =>
+            Effect.logWarning("Periodic snapshot failed in cluster entity", {
+              documentId,
+              error: e,
+            })
+          );
+          yield* Metric.increment(Metrics.storageIdleSnapshots);
+        }
+      });
+
+      // Run every idleTimeout
+      yield* snapshotLoop().pipe(
+        Effect.repeat(Schedule.spaced(config.snapshot.idleTimeout)),
+        Effect.fork
+      );
+    }
 
     // Return RPC handlers
     return {

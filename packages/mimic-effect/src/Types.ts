@@ -114,9 +114,15 @@ export type DurationInput = Duration.DurationInput;
  */
 export interface SnapshotConfig {
   /** Time-based snapshot interval */
-  readonly interval: DurationInput;
+  readonly interval?: DurationInput;
   /** Transaction count threshold for snapshots */
-  readonly transactionThreshold: number;
+  readonly transactionThreshold?: number;
+  /**
+   * Trigger snapshot when document is idle (no transactions) for this duration.
+   * Set to 0 to disable idle snapshots.
+   * Default: 30 seconds
+   */
+  readonly idleTimeout?: DurationInput;
 }
 
 /**
@@ -209,6 +215,7 @@ export interface ResolvedConfig<TSchema extends Primitive.AnyPrimitive> {
   readonly snapshot: {
     readonly interval: Duration.Duration;
     readonly transactionThreshold: number;
+    readonly idleTimeout: Duration.Duration;
   };
 }
 

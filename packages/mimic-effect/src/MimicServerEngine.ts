@@ -153,6 +153,7 @@ const DEFAULT_MAX_IDLE_TIME = Duration.minutes(5);
 const DEFAULT_MAX_TRANSACTION_HISTORY = 1000;
 const DEFAULT_SNAPSHOT_INTERVAL = Duration.minutes(5);
 const DEFAULT_SNAPSHOT_THRESHOLD = 100;
+const DEFAULT_SNAPSHOT_IDLE_TIMEOUT = Duration.seconds(30);
 
 /**
  * Resolve configuration with defaults
@@ -174,6 +175,9 @@ const resolveConfig = <TSchema extends Primitive.AnyPrimitive>(
       : DEFAULT_SNAPSHOT_INTERVAL,
     transactionThreshold:
       config.snapshot?.transactionThreshold ?? DEFAULT_SNAPSHOT_THRESHOLD,
+    idleTimeout: config.snapshot?.idleTimeout
+      ? Duration.decode(config.snapshot.idleTimeout)
+      : DEFAULT_SNAPSHOT_IDLE_TIMEOUT,
   },
 });
 
@@ -326,6 +330,62 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
       // Start GC fiber
       yield* startGCFiber();
+
+      /**
+       * Start background snapshot fiber for idle documents.
+       * This ensures documents with unsnapshot transactions get persisted
+       * even without new transaction activity.
+       */
+      const startSnapshotFiber = Effect.fn("engine.snapshot.fiber.start")(function* () {
+        const idleTimeoutMs = Duration.toMillis(resolvedConfig.snapshot.idleTimeout);
+
+        // Skip if idle snapshots are disabled
+        if (idleTimeoutMs <= 0) {
+          return;
+        }
+
+        const snapshotLoop = Effect.fn("engine.snapshot.loop")(function* () {
+          const current = yield* Ref.get(store);
+          const now = Date.now();
+
+          for (const [documentId, entry] of current) {
+            // Check if document has been idle long enough
+            const lastActivity = yield* Ref.get(entry.lastActivityTime);
+            const idleDuration = now - lastActivity;
+
+            if (idleDuration < idleTimeoutMs) {
+              // Document not idle long enough, skip
+              continue;
+            }
+
+            // Check if document has unsnapshot transactions
+            const needs = yield* entry.instance.needsSnapshot();
+            if (!needs) {
+              continue;
+            }
+
+            // Save snapshot (with error handling)
+            yield* Effect.catchAll(entry.instance.saveSnapshot(), (e) =>
+              Effect.logWarning("Periodic snapshot save failed", {
+                documentId,
+                error: e,
+              })
+            );
+
+            // Track metric
+            yield* Metric.increment(Metrics.storageIdleSnapshots);
+          }
+        });
+
+        // Run snapshot check every 10 seconds
+        yield* snapshotLoop().pipe(
+          Effect.repeat(Schedule.spaced("10 seconds")),
+          Effect.fork
+        );
+      });
+
+      // Start snapshot fiber
+      yield* startSnapshotFiber();
 
       // Cleanup on shutdown
       yield* Effect.addFinalizer(() =>

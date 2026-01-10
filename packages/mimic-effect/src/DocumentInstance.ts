@@ -76,6 +76,10 @@ export interface DocumentInstance<TSchema extends Primitive.AnyPrimitive> {
   readonly getVersion: () => number;
   /** Get document snapshot */
   readonly getSnapshot: () => { state: unknown; version: number };
+  /** Check if document has unsnapshot transactions that need persisting */
+  readonly needsSnapshot: () => Effect.Effect<boolean>;
+  /** Get the last activity timestamp for idle detection */
+  readonly getLastActivityTime: () => Effect.Effect<number>;
 }
 
 // =============================================================================
@@ -344,6 +348,11 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       yield* Ref.set(lastActivityTimeRef, Date.now());
     });
 
+    const needsSnapshot = () =>
+      Effect.map(Ref.get(transactionsSinceSnapshotRef), (n) => n > 0);
+
+    const getLastActivityTime = () => Ref.get(lastActivityTimeRef);
+
     return {
       document,
       pubsub,
@@ -354,6 +363,8 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       touch,
       getVersion: () => document.getVersion(),
       getSnapshot: () => document.getSnapshot(),
+      needsSnapshot,
+      getLastActivityTime,
     };
   });
 

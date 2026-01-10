@@ -100,6 +100,11 @@ export const transactionsLatency = Metric.histogram(
 export const storageSnapshots = Metric.counter("mimic.storage.snapshots");
 
 /**
+ * Snapshots triggered by idle document detection
+ */
+export const storageIdleSnapshots = Metric.counter("mimic.storage.idle_snapshots");
+
+/**
  * Snapshot save duration histogram (milliseconds)
  */
 export const storageSnapshotLatency = Metric.histogram(
@@ -174,6 +179,7 @@ export const MimicMetrics = {
 
   // Storage
   storageSnapshots,
+  storageIdleSnapshots,
   storageSnapshotLatency,
   storageWalAppends,
   storageVersionGaps,
