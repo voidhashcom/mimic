@@ -415,9 +415,9 @@ const tests: StorageTestCase<HotStorageTestError, HotStorageTag>[] = [
       const storage = yield* HotStorageTag;
       const entry: WalEntry = {
         transaction: Transaction.make([
-          { type: "set", path: ["a"], value: 1 },
-          { type: "set", path: ["b", "c"], value: "nested" },
-          { type: "set", path: ["arr"], value: [1, 2, 3] },
+          Operation.fromDefinition(OperationPath.make("a"), TestSetDefinition, 1),
+          Operation.fromDefinition(OperationPath.make("b/c"), TestSetDefinition, "nested"),
+          Operation.fromDefinition(OperationPath.make("arr"), TestSetDefinition, [1, 2, 3]),
         ]),
         version: 1,
         timestamp: Date.now(),
