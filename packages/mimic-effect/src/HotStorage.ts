@@ -32,7 +32,7 @@ export interface HotStorage {
    *
    * This is an atomic operation that:
    * 1. Verifies the previous entry has version = expectedVersion - 1
-   *    (or this is the first entry if expectedVersion === 1)
+   *    (or this is the first entry if expectedVersion === 1, accounting for baseVersion)
    * 2. Appends the entry if check passes
    *
    * Use this for two-phase commit to guarantee WAL ordering at write time.
@@ -40,12 +40,17 @@ export interface HotStorage {
    * @param documentId - Document ID
    * @param entry - WAL entry to append
    * @param expectedVersion - The version this entry should have (entry.version)
+   * @param baseVersion - Optional known snapshot version. When provided, an empty WAL
+   *                      is treated as "at this version" rather than "new document at version 0".
+   *                      This is necessary after truncation or restart to correctly validate
+   *                      that the next entry is baseVersion + 1.
    * @returns Effect that fails with WalVersionGapError if gap detected
    */
   readonly appendWithCheck: (
     documentId: string,
     entry: WalEntry,
-    expectedVersion: number
+    expectedVersion: number,
+    baseVersion?: number
   ) => Effect.Effect<void, HotStorageError | WalVersionGapError>;
 
   /**
@@ -155,7 +160,8 @@ export namespace InMemory {
             function* (
               documentId: string,
               entry: WalEntry,
-              expectedVersion: number
+              expectedVersion: number,
+              baseVersion?: number
             ) {
               type CheckResult =
                 | { type: "ok" }
@@ -170,24 +176,33 @@ export namespace InMemory {
                     existing._tag === "Some" ? existing.value : [];
 
                   // Find the highest version in existing entries
-                  const lastVersion =
+                  const lastEntryVersion =
                     entries.length > 0
                       ? Math.max(...entries.map((e) => e.version))
                       : 0;
 
+                  // Effective "last version" is max of entries and baseVersion
+                  // This handles the case after truncation or restart where
+                  // WAL is empty but we know the snapshot version
+                  const effectiveLastVersion =
+                    baseVersion !== undefined
+                      ? Math.max(lastEntryVersion, baseVersion)
+                      : lastEntryVersion;
+
                   // Gap check
                   if (expectedVersion === 1) {
                     // First entry: should have no entries with version >= 1
-                    if (lastVersion >= 1) {
-                      return [{ type: "gap", lastVersion }, map];
+                    // and baseVersion should be 0 or undefined
+                    if (effectiveLastVersion >= 1) {
+                      return [{ type: "gap", lastVersion: effectiveLastVersion }, map];
                     }
                   } else {
-                    // Not first: last entry should have version = expectedVersion - 1
-                    if (lastVersion !== expectedVersion - 1) {
+                    // Not first: effective last version should be expectedVersion - 1
+                    if (effectiveLastVersion !== expectedVersion - 1) {
                       return [
                         {
                           type: "gap",
-                          lastVersion: lastVersion > 0 ? lastVersion : undefined,
+                          lastVersion: effectiveLastVersion > 0 ? effectiveLastVersion : undefined,
                         },
                         map,
                       ];

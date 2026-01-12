@@ -744,6 +744,62 @@ const tests: StorageTestCase<HotStorageTestError, HotStorageTag>[] = [
     }),
   },
 
+  {
+    name: "appendWithCheck with baseVersion after full truncate works",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      // Append versions 1, 2, 3
+      yield* storage.appendWithCheck("gap-base-version", makeEntry(1), 1, 0);
+      yield* storage.appendWithCheck("gap-base-version", makeEntry(2), 2, 0);
+      yield* storage.appendWithCheck("gap-base-version", makeEntry(3), 3, 0);
+      // Truncate ALL entries (simulates snapshot at version 3)
+      yield* storage.truncate("gap-base-version", 3);
+      // Verify WAL is empty
+      const entriesAfterTruncate = yield* storage.getEntries("gap-base-version", 0);
+      yield* assertEmpty(entriesAfterTruncate, "WAL should be empty after full truncate");
+      // Append version 4 WITH baseVersion=3 (simulates knowing snapshot version)
+      yield* storage.appendWithCheck("gap-base-version", makeEntry(4), 4, 3);
+      const entries = yield* storage.getEntries("gap-base-version", 0);
+      yield* assertLength(entries, 1, "Should have version 4");
+      yield* assertEqual(entries[0]!.version, 4, "Entry should be version 4");
+    }),
+  },
+
+  {
+    name: "appendWithCheck with baseVersion still detects gaps",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      // Truncate (to establish empty WAL scenario)
+      yield* storage.truncate("gap-base-detect", 5);
+      // Try to append version 7 with baseVersion=5 (skipping version 6)
+      const result = yield* Effect.either(
+        storage.appendWithCheck("gap-base-detect", makeEntry(7), 7, 5)
+      );
+      yield* assertTrue(result._tag === "Left", "Should fail when skipping version 6");
+      if (result._tag === "Left") {
+        yield* assertTrue(
+          result.left._tag === "WalVersionGapError",
+          "Error should be WalVersionGapError"
+        );
+      }
+    }),
+  },
+
+  {
+    name: "appendWithCheck with baseVersion=0 allows version 1",
+    category: Categories.GapChecking,
+    run: Effect.gen(function* () {
+      const storage = yield* HotStorageTag;
+      // New document scenario: baseVersion=0, first entry should be version 1
+      yield* storage.appendWithCheck("gap-base-zero", makeEntry(1), 1, 0);
+      const entries = yield* storage.getEntries("gap-base-zero", 0);
+      yield* assertLength(entries, 1, "Should have version 1");
+      yield* assertEqual(entries[0]!.version, 1, "Entry should be version 1");
+    }),
+  },
+
   // ---------------------------------------------------------------------------
   // Transaction Encoding (Critical for OperationPath preservation)
   // ---------------------------------------------------------------------------

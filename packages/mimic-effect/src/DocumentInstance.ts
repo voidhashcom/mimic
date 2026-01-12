@@ -302,8 +302,12 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
         timestamp: Date.now(),
       };
 
+      // Get the current snapshot version to pass as baseVersion for gap checking
+      // This ensures correct validation after truncation or restart
+      const snapshotVersion = yield* Ref.get(lastSnapshotVersionRef);
+
       const appendResult = yield* Effect.either(
-        hotStorage.appendWithCheck(documentId, walEntry, validation.nextVersion)
+        hotStorage.appendWithCheck(documentId, walEntry, validation.nextVersion, snapshotVersion)
       );
 
       if (appendResult._tag === "Left") {
