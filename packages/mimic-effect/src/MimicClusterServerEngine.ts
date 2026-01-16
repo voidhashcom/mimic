@@ -135,9 +135,14 @@ const MimicDocumentEntity = Entity.make("MimicDocument", [
     success: SubmitResultSchema,
   }),
 
-  // Get document snapshot
+  // Get document snapshot (flat state)
   Rpc.make("GetSnapshot", {
     success: SnapshotResponseSchema,
+  }),
+
+  // Get tree-like snapshot for rendering
+  Rpc.make("GetTreeSnapshot", {
+    success: Schema.Unknown,
   }),
 
   // Touch document to prevent idle GC
@@ -341,6 +346,10 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
 
       GetSnapshot: Effect.fn("cluster.document.snapshot.get")(function* () {
         return instance.getSnapshot();
+      }),
+
+      GetTreeSnapshot: Effect.fn("cluster.document.tree-snapshot.get")(function* () {
+        return instance.toSnapshot();
       }),
 
       Touch: Effect.fn("cluster.document.touch")(function* () {
@@ -588,6 +597,12 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
           Effect.gen(function* () {
             const client = makeClient(documentId);
             return yield* client.GetSnapshot(undefined as void).pipe(Effect.orDie);
+          }),
+
+        getTreeSnapshot: (documentId) =>
+          Effect.gen(function* () {
+            const client = makeClient(documentId);
+            return yield* client.GetTreeSnapshot(undefined as void).pipe(Effect.orDie);
           }),
 
         subscribe: (documentId) =>

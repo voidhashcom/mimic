@@ -190,13 +190,13 @@ describe("MimicServerEngine", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const engine = yield* MimicServerEngineTag;
-            
+
             // Submit transaction
             const submitResult = yield* engine.submit("test-doc-2", tx);
-            
+
             // Get snapshot
             const snapshot = yield* engine.getSnapshot("test-doc-2");
-            
+
             return { submitResult, snapshot };
           })
         ).pipe(Effect.provide(makeTestLayer({ initial: { title: "Initial" } })))
@@ -208,6 +208,32 @@ describe("MimicServerEngine", () => {
       }
       // Note: state only includes properties that were explicitly set
       expect(result.snapshot.state).toEqual({ title: "Updated Title" });
+    });
+
+    it("should get tree snapshot for rendering", async () => {
+      const tx = createValidTransaction("Tree Snapshot Test");
+
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const engine = yield* MimicServerEngineTag;
+
+            // Submit transaction
+            yield* engine.submit("test-doc-tree", tx);
+
+            // Get tree snapshot (for rendering)
+            const treeSnapshot = yield* engine.getTreeSnapshot("test-doc-tree");
+
+            return treeSnapshot;
+          })
+        ).pipe(Effect.provide(makeTestLayer({ initial: { title: "Initial" } })))
+      );
+
+      // Tree snapshot should have the expected structure with defaults resolved
+      expect(result).toEqual({
+        title: "Tree Snapshot Test",
+        count: 0, // Default value
+      });
     });
 
     it("should touch document to update activity time", async () => {

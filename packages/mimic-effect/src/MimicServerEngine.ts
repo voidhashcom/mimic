@@ -74,11 +74,22 @@ export interface MimicServerEngine {
 
   /**
    * Get document snapshot (current state and version).
+   * Returns flat state format used for storage and synchronization.
    * May fail with MimicServerEngineError if storage is unavailable.
    */
   readonly getSnapshot: (
     documentId: string
   ) => Effect.Effect<{ state: unknown; version: number }, MimicServerEngineError>;
+
+  /**
+   * Get tree-like snapshot for rendering.
+   * Returns a readonly structure where trees are converted from
+   * flat state to nested/hierarchical structure suitable for UI rendering.
+   * May fail with MimicServerEngineError if storage is unavailable.
+   */
+  readonly getTreeSnapshot: (
+    documentId: string
+  ) => Effect.Effect<unknown, MimicServerEngineError>;
 
   /**
    * Subscribe to document broadcasts (transactions).
@@ -415,6 +426,12 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
           Effect.gen(function* () {
             const instance = yield* getOrCreateDocument(documentId);
             return instance.getSnapshot();
+          }),
+
+        getTreeSnapshot: (documentId) =>
+          Effect.gen(function* () {
+            const instance = yield* getOrCreateDocument(documentId);
+            return instance.toSnapshot();
           }),
 
         subscribe: (documentId) =>

@@ -74,8 +74,14 @@ export interface DocumentInstance<TSchema extends Primitive.AnyPrimitive> {
   readonly touch: () => Effect.Effect<void>;
   /** Get current document version */
   readonly getVersion: () => number;
-  /** Get document snapshot */
+  /** Get document snapshot (flat state format) */
   readonly getSnapshot: () => { state: unknown; version: number };
+  /**
+   * Get tree-like snapshot for rendering.
+   * The snapshot is a type-safe, readonly structure where trees
+   * are converted from flat state to nested/hierarchical structure.
+   */
+  readonly toSnapshot: () => Primitive.InferSnapshot<TSchema>;
   /** Check if document has unsnapshot transactions that need persisting */
   readonly needsSnapshot: () => Effect.Effect<boolean>;
   /** Get the last activity timestamp for idle detection */
@@ -367,6 +373,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       touch,
       getVersion: () => document.getVersion(),
       getSnapshot: () => document.getSnapshot(),
+      toSnapshot: () => document.toSnapshot(),
       needsSnapshot,
       getLastActivityTime,
     };

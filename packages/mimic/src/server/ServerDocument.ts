@@ -95,6 +95,15 @@ export interface ServerDocument<TSchema extends Primitive.AnyPrimitive> {
   /** Returns the current authoritative state */
   get(): Primitive.InferState<TSchema> | undefined;
 
+  /**
+   * Returns a readonly snapshot of the entire document state for rendering.
+   * The snapshot is a type-safe, readonly structure where:
+   * - Required fields and fields with defaults are guaranteed to be defined
+   * - Optional fields may be undefined
+   * - Trees are converted from flat state to nested/hierarchical structure
+   */
+  toSnapshot(): Primitive.InferSnapshot<TSchema>;
+
   /** Returns the current version number */
   getVersion(): number;
 
@@ -267,6 +276,10 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
     get: (): Primitive.InferState<TSchema> | undefined => {
       return _document.get();
+    },
+
+    toSnapshot: (): Primitive.InferSnapshot<TSchema> => {
+      return _document.toSnapshot();
     },
 
     getVersion: (): number => {
