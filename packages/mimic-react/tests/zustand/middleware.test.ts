@@ -79,6 +79,10 @@ const createMockClientDocument = (
     isReady: () => state.isReady,
     getPendingCount: () => state.pendingCount,
     hasPendingChanges: () => state.hasPendingChanges,
+    getActiveDraftIds: () => new Set<string>(),
+    createDraft: () => {
+      throw new Error("Not implemented in mock");
+    },
     connect: () => {
       // Mock connect - does nothing in tests
     },

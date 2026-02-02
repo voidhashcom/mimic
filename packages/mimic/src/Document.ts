@@ -112,12 +112,66 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
             : options.initial as Primitive.InferState<TSchema>)
         : schema._internal.getInitialState();
   
+  /**
+   * An ops buffer that maintains a dedup index for O(1) lookups by path:kind.
+   */
+  const makeOpsBuffer = () => {
+    let ops: Operation.Operation<any, any, any>[] = [];
+    // Maps "encodedPath:kind" → array index for deduplicable ops
+    let index = new Map<string, number>();
+
+    const dedupKey = (op: Operation.Operation<any, any, any>): string =>
+      `${OperationPath.encode(op.path)}:${String(op.kind)}`;
+
+    return {
+      push(op: Operation.Operation<any, any, any>): void {
+        if (op.deduplicable) {
+          const key = dedupKey(op);
+          const existing = index.get(key);
+          if (existing !== undefined) {
+            // Remove old entry; shift indices above it down by 1
+            ops.splice(existing, 1);
+            // Rebuild affected index entries
+            const newIndex = new Map<string, number>();
+            for (const [k, v] of index) {
+              if (k === key) continue;
+              newIndex.set(k, v > existing ? v - 1 : v);
+            }
+            index = newIndex;
+          }
+          index.set(key, ops.length);
+        }
+        ops.push(op);
+      },
+      /** Drains all ops and resets the buffer. */
+      drain(): Operation.Operation<any, any, any>[] {
+        const result = ops;
+        ops = [];
+        index = new Map();
+        return result;
+      },
+      /** Appends all ops from another buffer (used on tx commit). */
+      mergeFrom(other: ReturnType<typeof makeOpsBuffer>): void {
+        for (const op of other.toArray()) {
+          this.push(op);
+        }
+      },
+      toArray(): readonly Operation.Operation<any, any, any>[] {
+        return ops;
+      },
+      reset(): void {
+        ops = [];
+        index = new Map();
+      },
+    };
+  };
+
   // Pending operations buffer (local changes not yet flushed)
-  let _pending: Operation.Operation<any, any, any>[] = [];
-  
+  const _pending = makeOpsBuffer();
+
   // Transaction state
   let _inTransaction = false;
-  let _txOps: Operation.Operation<any, any, any>[] = [];
+  let _txOps = makeOpsBuffer();
   let _txBaseState: Primitive.InferState<TSchema> | undefined = undefined;
 
   /**
@@ -229,7 +283,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       
       // Start transaction
       _inTransaction = true;
-      _txOps = [];
+      _txOps.reset();
       _txBaseState = _state;
       
       try {
@@ -237,7 +291,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
         const result = fn(rootProxy);
         
         // Commit: add transaction ops to pending
-        _pending.push(..._txOps);
+        _pending.mergeFrom(_txOps);
         
         return result;
       } catch (error) {
@@ -247,7 +301,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       } finally {
         // Clean up transaction state
         _inTransaction = false;
-        _txOps = [];
+        _txOps.reset();
         _txBaseState = undefined;
       }
     },
@@ -259,8 +313,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
     },
     
     flush: (): Transaction.Transaction => {
-      const tx = Transaction.make(_pending);
-      _pending = [];
+      const tx = Transaction.make(_pending.drain());
       return tx;
     },
   };

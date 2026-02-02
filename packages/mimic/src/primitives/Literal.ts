@@ -48,6 +48,7 @@ export class LiteralPrimitive<T extends LiteralValue, TRequired extends boolean 
       payload: Schema.Unknown,
       target: Schema.Unknown,
       apply: (payload) => payload,
+      deduplicable: true,
     }),
   };
 

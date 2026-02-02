@@ -11,6 +11,7 @@
 // =============================================================================
 
 export { mimic } from "./middleware";
+export { useDraft } from "./useDraft";
 
 // =============================================================================
 // Types
@@ -22,3 +23,5 @@ export type {
   MimicMiddlewareOptions,
   MimicStateCreator,
 } from "./types";
+
+export type { UseDraftReturn } from "./useDraft";

@@ -401,6 +401,7 @@ export class TreePrimitive<TRoot extends AnyTreeNodePrimitive, TRequired extends
       payload: Schema.Unknown,
       target: Schema.Unknown,
       apply: (payload) => payload,
+      deduplicable: true,
     }),
     insert: OperationDefinition.make({
       kind: "tree.insert" as const,

@@ -94,6 +94,7 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TRequ
       payload: Schema.Unknown,
       target: Schema.Unknown,
       apply: (payload) => payload,
+      deduplicable: true,
     }),
   };
 

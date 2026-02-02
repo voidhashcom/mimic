@@ -116,6 +116,7 @@ export class ArrayPrimitive<TElement extends AnyPrimitive, TRequired extends boo
       payload: Schema.Unknown,
       target: Schema.Unknown,
       apply: (payload) => payload,
+      deduplicable: true,
     }),
     insert: OperationDefinition.make({
       kind: "array.insert" as const,

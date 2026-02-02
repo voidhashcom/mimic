@@ -454,9 +454,10 @@ describe("Document", () => {
 
       expect(doc.get()).toEqual({ counter: 11 });
 
-      // Only local ops should be pending
+      // Only local ops should be pending (deduplicable ops on same path are collapsed)
       const tx = doc.flush();
-      expect(tx.ops).toHaveLength(2);
+      expect(tx.ops).toHaveLength(1);
+      expect(tx.ops[0].payload).toBe(11);
     });
 
     it("handles struct with all primitive types", () => {

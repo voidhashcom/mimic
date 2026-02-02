@@ -8,6 +8,7 @@ export type Operation<TKind, TPayload extends Schema.Schema.Any, TDef extends Op
     readonly kind: TKind
     readonly path: OperationPath.OperationPath
     readonly payload: Schema.Schema.Type<TPayload>,
+    readonly deduplicable?: boolean
 
 } & TDef
 
@@ -16,6 +17,7 @@ export const fromDefinition = <TKind, TPayload extends Schema.Schema.Any, TDef e
         kind: definition.kind,
         path: operationPath,
         payload: payload,
+        ...(definition.deduplicable !== undefined ? { deduplicable: definition.deduplicable } : {}),
     } as Operation<TKind, TPayload, TDef>
 }
 

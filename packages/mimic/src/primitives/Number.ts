@@ -45,6 +45,7 @@ export class NumberPrimitive<TRequired extends boolean = false, THasDefault exte
       payload: Schema.Number,
       target: Schema.Number,
       apply: (payload) => payload,
+      deduplicable: true,
     }),
   };
 

@@ -61,6 +61,7 @@ const createMimicObject = <
     isReady: document.isReady(),
     pendingCount: document.getPendingCount(),
     hasPendingChanges: document.hasPendingChanges(),
+    activeDraftIds: document.getActiveDraftIds(),
   };
 };
 
@@ -104,6 +105,9 @@ const mimicImpl: MimicMiddlewareImpl = <
           updateMimicState();
         },
         onReady: () => {
+          updateMimicState();
+        },
+        onDraftChange: () => {
           updateMimicState();
         },
       });

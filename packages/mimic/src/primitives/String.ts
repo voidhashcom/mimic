@@ -49,6 +49,7 @@ export class StringPrimitive<TRequired extends boolean = false, THasDefault exte
       payload: Schema.String,
       target: Schema.String,
       apply: (payload) => payload,
+      deduplicable: true,
     }),
   };
 
