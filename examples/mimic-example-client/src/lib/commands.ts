@@ -41,7 +41,7 @@ export type KanbanStoreState = MimicSlice<
 // Commander
 // =============================================================================
 
-export const commander = createCommander<KanbanStoreState>();
+export const commander = createCommander<KanbanStoreState, typeof MimicExampleSchema>();
 
 // =============================================================================
 // Column Commands
@@ -53,10 +53,9 @@ export const commander = createCommander<KanbanStoreState>();
  */
 export const addColumn = commander.undoableAction<{title: string}, { columnId: string }>(
   (ctx, params) => {
-    const { mimic } = ctx.getState();
     let newColumnId: string | undefined;
-    
-    mimic.document.transaction((root) => {
+
+    ctx.transaction((root) => {
       const rootNode = root.root();
       if (!rootNode) throw new Error("Tree has no root node");
       // insertLast returns the id string directly
@@ -68,8 +67,7 @@ export const addColumn = commander.undoableAction<{title: string}, { columnId: s
     return { columnId: newColumnId! };
   },
   (ctx, _params, result) => {
-    const { mimic } = ctx.getState();
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.remove(result.columnId);
     });
   }
@@ -90,15 +88,14 @@ export const renameColumn = commander.undoableAction<{columnId: string, title: s
     ) as { name?: string } | undefined;
     const previousTitle = column?.name ?? "";
 
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.at(params.columnId, ColumnNode).name.set(params.title);
     });
 
     return { previousTitle };
   },
   (ctx, params, result) => {
-    const { mimic } = ctx.getState();
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.at(params.columnId, ColumnNode).name.set(result.previousTitle);
     });
   }
@@ -136,7 +133,7 @@ export const deleteColumn = commander.undoableAction<{columnId: string}, { colum
     const columnIndex =
       mimic.snapshot?.children.findIndex((c) => c.id === params.columnId) ?? -1;
 
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.remove(params.columnId);
     });
 
@@ -146,8 +143,7 @@ export const deleteColumn = commander.undoableAction<{columnId: string}, { colum
     const { columnData } = result;
     if (!columnData) return;
 
-    const { mimic } = ctx.getState();
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       const rootNode = root.root();
       if (!rootNode) throw new Error("Tree has no root node");
 
@@ -180,10 +176,9 @@ export const deleteColumn = commander.undoableAction<{columnId: string}, { colum
  */
 export const addCard = commander.undoableAction<{columnId: string, title: string, description?: string}, { cardId: string }>(
   (ctx, params) => {
-    const { mimic } = ctx.getState();
     let newCardId: string | undefined;
 
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       // insertLast returns the id string directly
       newCardId = root.insertLast(params.columnId, CardNode, {
         title: params.title,
@@ -194,8 +189,7 @@ export const addCard = commander.undoableAction<{columnId: string, title: string
     return { cardId: newCardId! };
   },
   (ctx, _params, result) => {
-    const { mimic } = ctx.getState();
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.remove(result.cardId);
     });
   }
@@ -228,7 +222,7 @@ export const updateCard = commander.undoableAction<{cardId: string, title: strin
       }
     }
 
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.at(params.cardId, CardNode).title.set(params.title);
       root.at(params.cardId, CardNode).description.set(params.description ?? "");
     });
@@ -236,8 +230,7 @@ export const updateCard = commander.undoableAction<{cardId: string, title: strin
     return { previousTitle, previousDescription };
   },
   (ctx, params, result) => {
-    const { mimic } = ctx.getState();
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.at(params.cardId, CardNode).title.set(result.previousTitle);
       root
         .at(params.cardId, CardNode)
@@ -281,7 +274,7 @@ export const deleteCard = commander.undoableAction<{cardId: string}, { cardData:
       }
     }
 
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.remove(params.cardId);
     });
 
@@ -290,8 +283,7 @@ export const deleteCard = commander.undoableAction<{cardId: string}, { cardData:
   (ctx, _params, result) => {
     if (!result.cardData || !result.columnId) return;
 
-    const { mimic } = ctx.getState();
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.insertAt(result.columnId!, result.cardIndex, CardNode, {
         title: result.cardData!.title,
         description: result.cardData!.description,
@@ -321,15 +313,14 @@ export const moveCard = commander.undoableAction<{cardId: string, destinationCol
       }
     }
 
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.move(params.cardId, params.destinationColumnId, params.destinationIndex);
     });
 
     return { sourceColumnId: sourceColumnId!, sourceIndex };
   },
   (ctx, params, result) => {
-    const { mimic } = ctx.getState();
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       root.move(params.cardId, result.sourceColumnId, result.sourceIndex);
     });
   }
@@ -351,7 +342,7 @@ export const reorderColumn = commander.undoableAction<{columnId: string, destina
     const sourceIndex =
       mimic.snapshot?.children.findIndex((c) => c.id === params.columnId) ?? -1;
 
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       const rootNode = root.root();
       if (!rootNode) throw new Error("Root node not found");
       root.move(params.columnId, rootNode.id, params.destinationIndex);
@@ -360,8 +351,7 @@ export const reorderColumn = commander.undoableAction<{columnId: string, destina
     return { sourceIndex };
   },
   (ctx, params, result) => {
-    const { mimic } = ctx.getState();
-    mimic.document.transaction((root) => {
+    ctx.transaction((root) => {
       const rootNode = root.root();
       if (!rootNode) throw new Error("Root node not found");
       root.move(params.columnId, rootNode.id, result.sourceIndex);

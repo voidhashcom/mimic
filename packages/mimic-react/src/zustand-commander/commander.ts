@@ -7,6 +7,8 @@
  */
 
 import type { StoreApi } from "zustand";
+import type { Primitive } from "@voidhash/mimic";
+import type { ClientDocument } from "@voidhash/mimic/client";
 import {
   COMMAND_SYMBOL,
   UNDOABLE_COMMAND_SYMBOL,
@@ -32,6 +34,34 @@ const DEFAULT_OPTIONS: Required<CommanderOptions> = {
 };
 
 // =============================================================================
+// Transaction Helper
+// =============================================================================
+
+/**
+ * Build a transaction function that routes to draft or document.
+ */
+function buildTransaction<TStore extends CommanderSlice, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive>(
+  storeApi: StoreApi<TStore>
+): (fn: (root: Primitive.InferProxy<TSchema>) => void) => void {
+  return (fn) => {
+    const state = storeApi.getState();
+    const draft = state._commander.activeDraft;
+    if (draft) {
+      draft.update(fn);
+    } else {
+      // Access mimic.document from the store
+      const mimic = (state as any).mimic;
+      if (!mimic?.document) {
+        throw new Error(
+          "Commander: No active draft and no mimic document found on the store."
+        );
+      }
+      mimic.document.transaction(fn);
+    }
+  };
+}
+
+// =============================================================================
 // Commander Implementation
 // =============================================================================
 
@@ -47,8 +77,7 @@ const DEFAULT_OPTIONS: Required<CommanderOptions> = {
  * const addItem = commander.action(
  *   Schema.Struct({ name: Schema.String }),
  *   (ctx, params) => {
- *     const { mimic } = ctx.getState();
- *     mimic.document.transaction(root => {
+ *     ctx.transaction(root => {
  *       // add item
  *     });
  *   }
@@ -64,9 +93,9 @@ const DEFAULT_OPTIONS: Required<CommanderOptions> = {
  * );
  * ```
  */
-export function createCommander<TStore extends object>(
+export function createCommander<TStore extends object, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive>(
   options: CommanderOptions = {}
-): Commander<TStore & CommanderSlice> {
+): Commander<TStore & CommanderSlice, TSchema> {
   const { maxUndoStackSize } = { ...DEFAULT_OPTIONS, ...options };
 
   // Track the store API once middleware is applied
@@ -75,9 +104,9 @@ export function createCommander<TStore extends object>(
   /**
    * Creates the dispatch function for use within command handlers.
    */
-  const createDispatch = (): CommandDispatch<TStore & CommanderSlice> => {
+  const createDispatch = (): CommandDispatch<TStore & CommanderSlice, TSchema> => {
     return <TParams, TReturn>(
-      command: Command<TStore & CommanderSlice, TParams, TReturn>
+      command: Command<TStore & CommanderSlice, TParams, TReturn, TSchema>
     ) => {
       return (params: TParams): TReturn => {
         if (!_storeApi) {
@@ -87,17 +116,21 @@ export function createCommander<TStore extends object>(
         }
 
         // Create context for the command
-        const ctx: CommandContext<TStore & CommanderSlice> = {
+        const ctx: CommandContext<TStore & CommanderSlice, TSchema> = {
           getState: () => _storeApi!.getState(),
           setState: (partial) => _storeApi!.setState(partial as any),
           dispatch: createDispatch(),
+          transaction: buildTransaction<TStore & CommanderSlice, TSchema>(_storeApi!),
         };
 
         // Execute the command
         const result = command.fn(ctx, params);
 
-        // If it's an undoable command, add to undo stack
-        if (isUndoableCommand(command)) {
+        // Skip undo stack when a draft is active
+        const hasDraft = _storeApi!.getState()._commander.activeDraft !== null;
+
+        // If it's an undoable command and no draft is active, add to undo stack
+        if (isUndoableCommand(command) && !hasDraft) {
           const entry: UndoEntry<TParams, TReturn> = {
             command,
             params,
@@ -106,7 +139,7 @@ export function createCommander<TStore extends object>(
           };
 
           _storeApi.setState((state: TStore & CommanderSlice) => {
-            const { undoStack, redoStack } = state._commander;
+            const { undoStack, redoStack: _redoStack } = state._commander;
 
             // Add to undo stack, respecting max size
             const newUndoStack = [...undoStack, entry].slice(-maxUndoStackSize);
@@ -115,6 +148,7 @@ export function createCommander<TStore extends object>(
             return {
               ...state,
               _commander: {
+                ...state._commander,
                 undoStack: newUndoStack,
                 redoStack: [],
               },
@@ -131,8 +165,8 @@ export function createCommander<TStore extends object>(
    * Create a regular command (no undo support).
    */
   function action<TParams, TReturn = void>(
-    fn: CommandFn<TStore & CommanderSlice, TParams, TReturn>
-  ): Command<TStore & CommanderSlice, TParams, TReturn> {
+    fn: CommandFn<TStore & CommanderSlice, TParams, TReturn, TSchema>
+  ): Command<TStore & CommanderSlice, TParams, TReturn, TSchema> {
     return {
       [COMMAND_SYMBOL]: true,
       fn,
@@ -143,9 +177,9 @@ export function createCommander<TStore extends object>(
    * Create an undoable command with undo/redo support.
    */
   function undoableAction<TParams, TReturn>(
-    fn: CommandFn<TStore & CommanderSlice, TParams, TReturn>,
-    revert: RevertFn<TStore & CommanderSlice, TParams, TReturn>
-  ): UndoableCommand<TStore & CommanderSlice, TParams, TReturn> {
+    fn: CommandFn<TStore & CommanderSlice, TParams, TReturn, TSchema>,
+    revert: RevertFn<TStore & CommanderSlice, TParams, TReturn, TSchema>
+  ): UndoableCommand<TStore & CommanderSlice, TParams, TReturn, TSchema> {
     return {
       [COMMAND_SYMBOL]: true,
       [UNDOABLE_COMMAND_SYMBOL]: true,
@@ -181,6 +215,7 @@ export function createCommander<TStore extends object>(
         _commander: {
           undoStack: [],
           redoStack: [],
+          activeDraft: null,
         },
       };
     };
@@ -189,8 +224,44 @@ export function createCommander<TStore extends object>(
   return {
     action,
     undoableAction,
-    middleware: middleware as Commander<TStore & CommanderSlice>["middleware"],
+    middleware: middleware as Commander<TStore & CommanderSlice, TSchema>["middleware"],
   };
+}
+
+// =============================================================================
+// Draft Helpers
+// =============================================================================
+
+/**
+ * Set the active draft on the commander slice.
+ * While a draft is active, transactions route through `draft.update()` and undo is disabled.
+ */
+export function setActiveDraft<TStore extends CommanderSlice>(
+  storeApi: StoreApi<TStore>,
+  draft: ClientDocument.DraftHandle<any>
+): void {
+  storeApi.setState((state: TStore) => ({
+    ...state,
+    _commander: {
+      ...state._commander,
+      activeDraft: draft,
+    },
+  }));
+}
+
+/**
+ * Clear the active draft from the commander slice.
+ */
+export function clearActiveDraft<TStore extends CommanderSlice>(
+  storeApi: StoreApi<TStore>
+): void {
+  storeApi.setState((state: TStore) => ({
+    ...state,
+    _commander: {
+      ...state._commander,
+      activeDraft: null,
+    },
+  }));
 }
 
 // =============================================================================
@@ -199,13 +270,18 @@ export function createCommander<TStore extends object>(
 
 /**
  * Perform an undo operation on the store.
- * Returns true if an undo was performed, false if undo stack was empty.
+ * Returns true if an undo was performed, false if undo stack was empty or a draft is active.
  */
 export function performUndo<TStore extends CommanderSlice>(
   storeApi: StoreApi<TStore>
 ): boolean {
   const state = storeApi.getState();
-  const { undoStack, redoStack } = state._commander;
+  const { undoStack, redoStack, activeDraft } = state._commander;
+
+  // Undo is disabled while a draft is active
+  if (activeDraft) {
+    return false;
+  }
 
   // Pop the last entry from undo stack
   const entry = undoStack[undoStack.length - 1];
@@ -220,6 +296,7 @@ export function performUndo<TStore extends CommanderSlice>(
     getState: () => storeApi.getState(),
     setState: (partial) => storeApi.setState(partial as any),
     dispatch: createDispatchForUndo(storeApi),
+    transaction: buildTransaction(storeApi),
   };
 
   // Execute the revert function
@@ -229,6 +306,7 @@ export function performUndo<TStore extends CommanderSlice>(
   storeApi.setState((state: TStore) => ({
     ...state,
     _commander: {
+      ...state._commander,
       undoStack: newUndoStack,
       redoStack: [...redoStack, entry],
     },
@@ -239,13 +317,18 @@ export function performUndo<TStore extends CommanderSlice>(
 
 /**
  * Perform a redo operation on the store.
- * Returns true if a redo was performed, false if redo stack was empty.
+ * Returns true if a redo was performed, false if redo stack was empty or a draft is active.
  */
 export function performRedo<TStore extends CommanderSlice>(
   storeApi: StoreApi<TStore>
 ): boolean {
   const state = storeApi.getState();
-  const { undoStack, redoStack } = state._commander;
+  const { undoStack, redoStack, activeDraft } = state._commander;
+
+  // Redo is disabled while a draft is active
+  if (activeDraft) {
+    return false;
+  }
 
   // Pop the last entry from redo stack
   const entry = redoStack[redoStack.length - 1];
@@ -260,6 +343,7 @@ export function performRedo<TStore extends CommanderSlice>(
     getState: () => storeApi.getState(),
     setState: (partial) => storeApi.setState(partial as any),
     dispatch: createDispatchForUndo(storeApi),
+    transaction: buildTransaction(storeApi),
   };
 
   // Re-execute the command
@@ -277,6 +361,7 @@ export function performRedo<TStore extends CommanderSlice>(
   storeApi.setState((state: TStore) => ({
     ...state,
     _commander: {
+      ...state._commander,
       undoStack: [...undoStack, newEntry],
       redoStack: newRedoStack,
     },
@@ -298,6 +383,7 @@ function createDispatchForUndo<TStore>(
         getState: () => storeApi.getState(),
         setState: (partial) => storeApi.setState(partial as any),
         dispatch: createDispatchForUndo(storeApi),
+        transaction: buildTransaction(storeApi),
       };
 
       // Execute without adding to undo stack
@@ -315,9 +401,9 @@ export function clearUndoHistory<TStore extends CommanderSlice>(
   storeApi.setState((state: TStore) => ({
     ...state,
     _commander: {
+      ...state._commander,
       undoStack: [],
       redoStack: [],
     },
   }));
 }
-

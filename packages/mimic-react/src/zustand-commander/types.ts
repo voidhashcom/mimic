@@ -7,6 +7,8 @@
  */
 
 import type { StoreApi, UseBoundStore } from "zustand";
+import type { Primitive } from "@voidhash/mimic";
+import type { ClientDocument } from "@voidhash/mimic/client";
 
 // =============================================================================
 // Command Symbol & Type Guard
@@ -32,7 +34,7 @@ export const UNDOABLE_COMMAND_SYMBOL = Symbol.for(
  * Context provided to command functions.
  * Gives access to store state and dispatch capabilities.
  */
-export interface CommandContext<TStore> {
+export interface CommandContext<TStore, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive> {
   /**
    * Get the current store state.
    */
@@ -50,7 +52,13 @@ export interface CommandContext<TStore> {
    * @example
    * dispatch(otherCommand)({ param: "value" });
    */
-  readonly dispatch: CommandDispatch<TStore>;
+  readonly dispatch: CommandDispatch<TStore, TSchema>;
+
+  /**
+   * Run a transaction on the document.
+   * Routes to the active draft if one is linked, otherwise to the document directly.
+   */
+  readonly transaction: (fn: (root: Primitive.InferProxy<TSchema>) => void) => void;
 }
 
 // =============================================================================
@@ -60,8 +68,8 @@ export interface CommandContext<TStore> {
 /**
  * The function signature for a command handler.
  */
-export type CommandFn<TStore, TParams, TReturn> = (
-  ctx: CommandContext<TStore>,
+export type CommandFn<TStore, TParams, TReturn, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive> = (
+  ctx: CommandContext<TStore, TSchema>,
   params: TParams
 ) => TReturn;
 
@@ -69,8 +77,8 @@ export type CommandFn<TStore, TParams, TReturn> = (
  * The function signature for an undoable command's revert handler.
  * Receives the original params and the result from the forward execution.
  */
-export type RevertFn<TStore, TParams, TReturn> = (
-  ctx: CommandContext<TStore>,
+export type RevertFn<TStore, TParams, TReturn, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive> = (
+  ctx: CommandContext<TStore, TSchema>,
   params: TParams,
   result: TReturn
 ) => void;
@@ -83,19 +91,19 @@ export type RevertFn<TStore, TParams, TReturn> = (
  * A command that can be dispatched to modify store state.
  * Regular commands do not support undo/redo.
  */
-export interface Command<TStore, TParams, TReturn> {
+export interface Command<TStore, TParams, TReturn, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive> {
   readonly [COMMAND_SYMBOL]: true;
-  readonly fn: CommandFn<TStore, TParams, TReturn>;
+  readonly fn: CommandFn<TStore, TParams, TReturn, TSchema>;
 }
 
 /**
  * An undoable command that supports undo/redo.
  * Must provide a revert function that knows how to undo the change.
  */
-export interface UndoableCommand<TStore, TParams, TReturn>
-  extends Command<TStore, TParams, TReturn> {
+export interface UndoableCommand<TStore, TParams, TReturn, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive>
+  extends Command<TStore, TParams, TReturn, TSchema> {
   readonly [UNDOABLE_COMMAND_SYMBOL]: true;
-  readonly revert: RevertFn<TStore, TParams, TReturn>;
+  readonly revert: RevertFn<TStore, TParams, TReturn, TSchema>;
 }
 
 /**
@@ -119,8 +127,8 @@ export type AnyUndoableCommand = UndoableCommand<any, any, any>;
  * @example
  * const result = dispatch(myCommand)({ param: "value" });
  */
-export type CommandDispatch<TStore> = <TParams, TReturn>(
-  command: Command<TStore, TParams, TReturn>
+export type CommandDispatch<TStore, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive> = <TParams, TReturn>(
+  command: Command<TStore, TParams, TReturn, TSchema>
 ) => (params: TParams) => TReturn;
 
 // =============================================================================
@@ -151,6 +159,8 @@ export interface CommanderSlice {
     readonly undoStack: ReadonlyArray<UndoEntry>;
     /** Stack of commands that can be redone */
     readonly redoStack: ReadonlyArray<UndoEntry>;
+    /** Active draft handle, if any. When set, transactions route through the draft and undo is disabled. */
+    readonly activeDraft: ClientDocument.DraftHandle<any> | null;
   };
 }
 
@@ -173,7 +183,7 @@ export interface CommanderOptions {
  * A commander instance bound to a specific store type.
  * Used to create commands and the middleware.
  */
-export interface Commander<TStore> {
+export interface Commander<TStore, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive> {
   /**
    * Create a regular command (no undo support).
    *
@@ -193,13 +203,13 @@ export interface Commander<TStore> {
   readonly action: {
     // With params (explicit type parameter)
     <TParams, TReturn = void>(
-      fn: CommandFn<TStore, TParams, TReturn>
-    ): Command<TStore, TParams, TReturn>;
+      fn: CommandFn<TStore, TParams, TReturn, TSchema>
+    ): Command<TStore, TParams, TReturn, TSchema>;
 
     // Without params (void) - inferred when no type param provided
     <TReturn = void>(
-      fn: CommandFn<TStore, void, TReturn>
-    ): Command<TStore, void, TReturn>;
+      fn: CommandFn<TStore, void, TReturn, TSchema>
+    ): Command<TStore, void, TReturn, TSchema>;
   };
 
   /**
@@ -222,15 +232,15 @@ export interface Commander<TStore> {
   readonly undoableAction: {
     // With params (explicit type parameter)
     <TParams, TReturn>(
-      fn: CommandFn<TStore, TParams, TReturn>,
-      revert: RevertFn<TStore, TParams, TReturn>
-    ): UndoableCommand<TStore, TParams, TReturn>;
+      fn: CommandFn<TStore, TParams, TReturn, TSchema>,
+      revert: RevertFn<TStore, TParams, TReturn, TSchema>
+    ): UndoableCommand<TStore, TParams, TReturn, TSchema>;
 
     // Without params (void)
     <TReturn>(
-      fn: CommandFn<TStore, void, TReturn>,
-      revert: RevertFn<TStore, void, TReturn>
-    ): UndoableCommand<TStore, void, TReturn>;
+      fn: CommandFn<TStore, void, TReturn, TSchema>,
+      revert: RevertFn<TStore, void, TReturn, TSchema>
+    ): UndoableCommand<TStore, void, TReturn, TSchema>;
   };
 
   /**

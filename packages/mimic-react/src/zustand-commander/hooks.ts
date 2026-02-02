@@ -8,7 +8,8 @@
 
 import { useCallback, useEffect, useMemo } from "react";
 import { useStore, type StoreApi, type UseBoundStore } from "zustand";
-import { performRedo, performUndo, clearUndoHistory } from "./commander";
+import type { Primitive } from "@voidhash/mimic";
+import { performRedo, performUndo, clearUndoHistory, setActiveDraft, clearActiveDraft } from "./commander";
 import {
   isUndoableCommand,
   type Command,
@@ -26,26 +27,50 @@ import {
  * Creates a dispatch function for commands.
  * This is for use outside of React components (e.g., in command handlers).
  */
-function createDispatchFromApi<TStore extends CommanderSlice>(
+function buildTransactionFromApi<TStore extends CommanderSlice, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive>(
+  storeApi: StoreApi<TStore>
+): (fn: (root: Primitive.InferProxy<TSchema>) => void) => void {
+  return (fn) => {
+    const state = storeApi.getState();
+    const draft = state._commander.activeDraft;
+    if (draft) {
+      draft.update(fn);
+    } else {
+      const mimic = (state as any).mimic;
+      if (!mimic?.document) {
+        throw new Error(
+          "Commander: No active draft and no mimic document found on the store."
+        );
+      }
+      mimic.document.transaction(fn);
+    }
+  };
+}
+
+function createDispatchFromApi<TStore extends CommanderSlice, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive>(
   storeApi: StoreApi<TStore>,
   maxUndoStackSize = 100
-): CommandDispatch<TStore> {
-  const dispatch: CommandDispatch<TStore> = <TParams, TReturn>(
-    command: Command<TStore, TParams, TReturn>
+): CommandDispatch<TStore, TSchema> {
+  const dispatch: CommandDispatch<TStore, TSchema> = <TParams, TReturn>(
+    command: Command<TStore, TParams, TReturn, TSchema>
   ) => {
     return (params: TParams): TReturn => {
       // Create context for the command
-      const ctx: CommandContext<TStore> = {
+      const ctx: CommandContext<TStore, TSchema> = {
         getState: () => storeApi.getState(),
         setState: (partial) => storeApi.setState(partial as Partial<TStore>),
         dispatch,
+        transaction: buildTransactionFromApi<TStore, TSchema>(storeApi),
       };
 
       // Execute the command
       const result = command.fn(ctx, params);
 
-      // If it's an undoable command, add to undo stack
-      if (isUndoableCommand(command)) {
+      // Skip undo stack when a draft is active
+      const hasDraft = storeApi.getState()._commander.activeDraft !== null;
+
+      // If it's an undoable command and no draft is active, add to undo stack
+      if (isUndoableCommand(command) && !hasDraft) {
         storeApi.setState((state: TStore) => {
           const { undoStack } = state._commander;
 
@@ -64,6 +89,7 @@ function createDispatchFromApi<TStore extends CommanderSlice>(
           return {
             ...state,
             _commander: {
+              ...state._commander,
               undoStack: newUndoStack,
               redoStack: [],
             },
@@ -91,9 +117,9 @@ function createDispatchFromApi<TStore extends CommanderSlice>(
  * };
  * ```
  */
-export function useCommander<TStore extends CommanderSlice>(
+export function useCommander<TStore extends CommanderSlice, TSchema extends Primitive.AnyPrimitive = Primitive.AnyPrimitive>(
   store: UseBoundStore<StoreApi<TStore>>
-): CommandDispatch<TStore> {
+): CommandDispatch<TStore, TSchema> {
   // Get the store API
   const storeApi = useMemo(() => {
     // UseBoundStore has the StoreApi attached
@@ -102,11 +128,11 @@ export function useCommander<TStore extends CommanderSlice>(
 
   // Create a stable dispatch function
   const dispatch = useMemo(
-    () => createDispatchFromApi<TStore>(storeApi),
+    () => createDispatchFromApi<TStore, TSchema>(storeApi),
     [storeApi]
   );
 
-  return dispatch as CommandDispatch<TStore>;
+  return dispatch as CommandDispatch<TStore, TSchema>;
 }
 
 // =============================================================================

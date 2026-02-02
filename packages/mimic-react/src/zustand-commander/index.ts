@@ -80,6 +80,8 @@ export {
   performUndo,
   performRedo,
   clearUndoHistory,
+  setActiveDraft,
+  clearActiveDraft,
 } from "./commander";
 
 // =============================================================================
