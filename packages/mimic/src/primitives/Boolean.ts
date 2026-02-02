@@ -45,6 +45,7 @@ export class BooleanPrimitive<TRequired extends boolean = false, THasDefault ext
       payload: Schema.Boolean,
       target: Schema.Boolean,
       apply: (payload) => payload,
+      deduplicable: true,
     }),
   };
 

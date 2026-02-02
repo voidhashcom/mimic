@@ -86,6 +86,7 @@ export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator exte
       payload: Schema.Unknown,
       target: Schema.Unknown,
       apply: (payload) => payload,
+      deduplicable: true,
     }),
   };
 

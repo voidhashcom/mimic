@@ -1,5 +1,7 @@
 import * as Document from "../Document";
 import * as Transaction from "../Transaction";
+import * as Operation from "../Operation";
+import * as OperationPath from "../OperationPath";
 import * as Presence from "../Presence";
 import type * as Primitive from "../Primitive";
 import type * as Transport from "./Transport";
@@ -9,6 +11,32 @@ import {
   NotConnectedError,
   InvalidStateError,
 } from "./errors";
+
+// =============================================================================
+// Draft Types
+// =============================================================================
+
+/**
+ * Internal state for a single draft.
+ */
+interface DraftState {
+  /** Accumulated ops keyed by `pathString:kind` for per-field replace semantics */
+  ops: Map<string, Operation.Operation<any, any, any>>;
+}
+
+/**
+ * Handle returned by `createDraft()` for managing a draft lifecycle.
+ */
+export interface DraftHandle<TSchema extends Primitive.AnyPrimitive> {
+  /** Unique ID for this draft */
+  readonly id: string;
+  /** Run a mutation for preview. Per-path ops replace previous; different paths accumulate. */
+  update(fn: (root: Primitive.InferProxy<TSchema>) => void): void;
+  /** Commit draft as a real transaction sent to server. Draft is consumed. */
+  commit(): void;
+  /** Discard draft, reverting preview state. */
+  discard(): void;
+}
 
 // =============================================================================
 // Client Document Types
@@ -145,6 +173,8 @@ export interface ClientDocumentListener<TSchema extends Primitive.AnyPrimitive> 
   readonly onConnectionChange?: (connected: boolean) => void;
   /** Called when client is fully initialized and ready */
   readonly onReady?: () => void;
+  /** Called when draft state changes (create, update, commit, discard) */
+  readonly onDraftChange?: () => void;
 }
 
 /**
@@ -211,6 +241,17 @@ export interface ClientDocument<
    * @returns Unsubscribe function
    */
   subscribe(listener: ClientDocumentListener<TSchema>): () => void;
+
+  /**
+   * Creates a new draft for in-memory preview without sending to server.
+   * Draft ops overlay on top of optimistic state.
+   */
+  createDraft(): DraftHandle<TSchema>;
+
+  /**
+   * Returns the set of active draft IDs.
+   */
+  getActiveDraftIds(): ReadonlySet<string>;
 
   /**
    * Presence API for ephemeral per-user data.
@@ -306,6 +347,12 @@ export const make = <
   const _presenceSubscribers = new Set<PresenceListener<unknown>>();
 
   // ==========================================================================
+  // Draft State
+  // ==========================================================================
+
+  const _drafts = new Map<string, DraftState>();
+
+  // ==========================================================================
   // Debug Logging
   // ==========================================================================
 
@@ -363,6 +410,16 @@ export const make = <
     onReady?.();
     for (const listener of _subscribers) {
       listener.onReady?.();
+    }
+  };
+
+  /**
+   * Notifies all listeners of a draft change.
+   */
+  const notifyDraftChange = (): void => {
+    debugLog("notifyDraftChange", { draftCount: _drafts.size });
+    for (const listener of _subscribers) {
+      listener.onDraftChange?.();
     }
   };
 
@@ -464,6 +521,7 @@ export const make = <
     debugLog("recomputeOptimisticState", {
       serverVersion: _serverVersion,
       pendingCount: _pending.length,
+      draftCount: _drafts.size,
       serverState: _serverState,
     });
 
@@ -473,6 +531,14 @@ export const make = <
     // Apply all pending transactions
     for (const pending of _pending) {
       _optimisticDoc.apply(pending.transaction.ops);
+    }
+
+    // Apply all draft ops on top
+    for (const draft of _drafts.values()) {
+      const draftOps = Array.from(draft.ops.values());
+      if (draftOps.length > 0) {
+        _optimisticDoc.apply(draftOps);
+      }
     }
 
     const newState = _optimisticDoc.get();
@@ -1086,6 +1152,116 @@ export const make = <
       return () => {
         _subscribers.delete(listener);
       };
+    },
+
+    // =========================================================================
+    // Draft API
+    // =========================================================================
+
+    createDraft: (): DraftHandle<TSchema> => {
+      if (_initState.type !== "ready") {
+        throw new InvalidStateError("Client is not ready. Wait for initialization to complete.");
+      }
+
+      const draftId = crypto.randomUUID();
+      const draftState: DraftState = { ops: new Map() };
+      _drafts.set(draftId, draftState);
+
+      debugLog("createDraft", { draftId });
+      notifyDraftChange();
+
+      let consumed = false;
+
+      const handle: DraftHandle<TSchema> = {
+        id: draftId,
+
+        update: (fn: (root: Primitive.InferProxy<TSchema>) => void): void => {
+          if (consumed) {
+            throw new InvalidStateError("Draft has already been committed or discarded.");
+          }
+
+          // Create a scratch document from current optimistic state (without this draft's ops)
+          // First compute base = server + pending + other drafts
+          const baseDoc = Document.make(schema, { initialState: _serverState });
+          for (const pending of _pending) {
+            baseDoc.apply(pending.transaction.ops);
+          }
+          for (const [id, d] of _drafts) {
+            if (id !== draftId) {
+              const ops = Array.from(d.ops.values());
+              if (ops.length > 0) baseDoc.apply(ops);
+            }
+          }
+          // Also apply current draft ops so the scratch doc has full state
+          const currentDraftOps = Array.from(draftState.ops.values());
+          if (currentDraftOps.length > 0) baseDoc.apply(currentDraftOps);
+
+          // Run transaction on scratch doc
+          baseDoc.transaction(fn);
+          const tx = baseDoc.flush();
+
+          // Merge new ops into draft's op map
+          for (const op of tx.ops) {
+            const pathStr = OperationPath.encode(op.path);
+            const key = `${pathStr}:${String(op.kind)}`;
+            if (op.deduplicable) {
+              draftState.ops.set(key, op);
+            } else {
+              // Use a unique key to avoid overwriting non-deduplicable ops
+              const uniqueKey = `${key}:${crypto.randomUUID()}`;
+              draftState.ops.set(uniqueKey, op);
+            }
+          }
+
+          debugLog("draft.update", { draftId, newOpsCount: tx.ops.length, totalOps: draftState.ops.size });
+
+          // Recompute optimistic state to reflect draft changes
+          recomputeOptimisticState();
+          notifyDraftChange();
+        },
+
+        commit: (): void => {
+          if (consumed) {
+            throw new InvalidStateError("Draft has already been committed or discarded.");
+          }
+          consumed = true;
+
+          const ops = Array.from(draftState.ops.values());
+          _drafts.delete(draftId);
+
+          debugLog("draft.commit", { draftId, opsCount: ops.length });
+
+          if (ops.length > 0) {
+            const tx = Transaction.make(ops);
+            submitTransaction(tx);
+          }
+
+          // Recompute: draft is removed, but committed ops are now in pending
+          recomputeOptimisticState();
+
+          notifyDraftChange();
+        },
+
+        discard: (): void => {
+          if (consumed) {
+            throw new InvalidStateError("Draft has already been committed or discarded.");
+          }
+          consumed = true;
+
+          _drafts.delete(draftId);
+
+          debugLog("draft.discard", { draftId });
+
+          recomputeOptimisticState();
+          notifyDraftChange();
+        },
+      };
+
+      return handle;
+    },
+
+    getActiveDraftIds: (): ReadonlySet<string> => {
+      return new Set(_drafts.keys());
     },
 
     // =========================================================================

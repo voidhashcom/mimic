@@ -66,6 +66,8 @@ export interface MimicObject<
   readonly pendingCount: number;
   /** Whether there are pending changes */
   readonly hasPendingChanges: boolean;
+  /** Set of active draft IDs */
+  readonly activeDraftIds: ReadonlySet<string>;
 }
 
 /**

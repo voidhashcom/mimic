@@ -8,6 +8,7 @@ import type * as Transport from "../../src/client/Transport";
 import * as Rebase from "../../src/client/Rebase";
 import * as StateMonitor from "../../src/client/StateMonitor";
 import * as Presence from "../../src/Presence";
+import * as Document from "../../src/Document";
 
 // =============================================================================
 // Mock Transport
@@ -1700,6 +1701,182 @@ describe("ClientDocument Presence", () => {
 
       // Should notify when clearing presence
       expect(changeCount).toBe(1);
+    });
+  });
+
+  // ===========================================================================
+  // Draft Tests
+  // ===========================================================================
+
+  describe("drafts", () => {
+    it("should create a draft and preview changes without sending to server", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.update((root) => root.title.set("Draft Title"));
+
+      // Optimistic state should include draft
+      expect(client.get()?.title).toBe("Draft Title");
+      // No transaction sent to server
+      expect(transport.sentTransactions.length).toBe(0);
+    });
+
+    it("should replace per-field ops on same path", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.update((root) => root.title.set("First"));
+      draft.update((root) => root.title.set("Second"));
+
+      expect(client.get()?.title).toBe("Second");
+      expect(transport.sentTransactions.length).toBe(0);
+    });
+
+    it("should accumulate ops across different fields", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.update((root) => root.title.set("New Title"));
+      draft.update((root) => root.count.set(42));
+
+      expect(client.get()?.title).toBe("New Title");
+      expect(client.get()?.count).toBe(42);
+    });
+
+    it("should commit draft as a single transaction", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.update((root) => root.title.set("Committed"));
+      draft.update((root) => root.count.set(10));
+      draft.commit();
+
+      // Should have sent exactly one transaction
+      expect(transport.sentTransactions.length).toBe(1);
+      // State should still reflect the changes
+      expect(client.get()?.title).toBe("Committed");
+      expect(client.get()?.count).toBe(10);
+      // Draft should be consumed
+      expect(client.getActiveDraftIds().size).toBe(0);
+    });
+
+    it("should discard draft and revert to non-draft state", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.update((root) => root.title.set("Draft"));
+
+      expect(client.get()?.title).toBe("Draft");
+
+      draft.discard();
+
+      expect(client.get()?.title).toBe("Hello");
+      expect(transport.sentTransactions.length).toBe(0);
+      expect(client.getActiveDraftIds().size).toBe(0);
+    });
+
+    it("should throw when using a consumed draft", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.commit();
+
+      expect(() => draft.update((root) => root.title.set("x"))).toThrow();
+      expect(() => draft.commit()).toThrow();
+      expect(() => draft.discard()).toThrow();
+    });
+
+    it("should support multiple concurrent drafts", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft1 = client.createDraft();
+      const draft2 = client.createDraft();
+
+      draft1.update((root) => root.title.set("Draft1"));
+      draft2.update((root) => root.count.set(99));
+
+      expect(client.get()?.title).toBe("Draft1");
+      expect(client.get()?.count).toBe(99);
+      expect(client.getActiveDraftIds().size).toBe(2);
+
+      draft1.discard();
+      expect(client.get()?.title).toBe("Hello");
+      expect(client.get()?.count).toBe(99);
+
+      draft2.commit();
+      expect(client.get()?.count).toBe(99);
+      expect(transport.sentTransactions.length).toBe(1);
+    });
+
+    it("should rebase draft ops when server transaction arrives", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.update((root) => root.title.set("My Draft"));
+
+      // Create a proper server transaction by using a scratch document
+      const scratchDoc = Document.make(TestSchema, { initialState });
+      scratchDoc.transaction((root) => root.count.set(50));
+      const serverTx = scratchDoc.flush();
+      // Override the ID for clarity
+      const serverTxWithId = { ...serverTx, id: "server-tx-1" };
+
+      transport.simulateServerMessage({
+        type: "transaction",
+        transaction: serverTxWithId,
+        version: 1,
+      });
+
+      // Draft title should survive, server count should be applied
+      expect(client.get()?.title).toBe("My Draft");
+      expect(client.get()?.count).toBe(50);
+    });
+
+    it("should notify onDraftChange listeners", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      let draftChangeCount = 0;
+      client.subscribe({
+        onDraftChange: () => { draftChangeCount++; },
+      });
+
+      const draft = client.createDraft();
+      expect(draftChangeCount).toBe(1); // createDraft
+
+      draft.update((root) => root.title.set("x"));
+      expect(draftChangeCount).toBe(2); // update
+
+      draft.discard();
+      expect(draftChangeCount).toBe(3); // discard
+    });
+
+    it("should commit empty draft without sending transaction", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.commit();
+
+      expect(transport.sentTransactions.length).toBe(0);
     });
   });
 });

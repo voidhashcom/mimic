@@ -18,6 +18,7 @@ export * as Presence from "../Presence";
 // =============================================================================
 
 export * as ClientDocument from "./ClientDocument";
+export type { DraftHandle } from "./ClientDocument";
 
 // =============================================================================
 // Transport Interface
