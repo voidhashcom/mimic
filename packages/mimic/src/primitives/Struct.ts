@@ -90,11 +90,26 @@ export type MakeOptional<T extends AnyPrimitive> = T extends Primitive<infer S, 
   : T;
 
 /**
+ * Transforms a primitive type to make it optional and strip its default (TRequired = false, THasDefault = false).
+ */
+export type MakeOptionalNoDefault<T extends AnyPrimitive> = T extends Primitive<infer S, infer P, any, any, infer SI, infer UI>
+  ? Primitive<S, P, false, false, SI, UI>
+  : T;
+
+/**
  * Maps each field in a struct to its optional version.
  * All fields become optional (TRequired = false).
  */
 export type PartialFields<TFields extends Record<string, AnyPrimitive>> = {
   [K in keyof TFields]: MakeOptional<TFields[K]>;
+};
+
+/**
+ * Maps each field in a struct to its optional version with defaults stripped.
+ * All fields become optional (TRequired = false) and lose their defaults (THasDefault = false).
+ */
+export type PartialFieldsNoDefault<TFields extends Record<string, AnyPrimitive>> = {
+  [K in keyof TFields]: MakeOptionalNoDefault<TFields[K]>;
 };
 
 /**
@@ -198,13 +213,23 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TRequ
     });
   }
 
-  /** Make all properties of this struct optional (TRequired = false for all fields) */
-  partial(): StructPrimitive<PartialFields<TFields>, TRequired, THasDefault> {
+  /** Make all properties of this struct optional (TRequired = false for all fields), optionally stripping defaults */
+  partial(options: { stripDefaults: true }): StructPrimitive<PartialFieldsNoDefault<TFields>, TRequired, THasDefault>;
+  partial(options?: { stripDefaults?: boolean }): StructPrimitive<PartialFields<TFields>, TRequired, THasDefault>;
+  partial(options?: { stripDefaults?: boolean }): StructPrimitive<PartialFields<TFields>, TRequired, THasDefault> | StructPrimitive<PartialFieldsNoDefault<TFields>, TRequired, THasDefault> {
+    const stripDefaults = options?.stripDefaults;
     const partialFields: Record<string, AnyPrimitive> = {};
     for (const key in this._schema.fields) {
       const field = this._schema.fields[key]!;
-      // Create a new field that is not required (optional)
-      partialFields[key] = this._makeFieldOptional(field);
+      partialFields[key] = this._makeFieldOptional(field, stripDefaults);
+    }
+    if (stripDefaults) {
+      return new StructPrimitive<PartialFieldsNoDefault<TFields>, TRequired, THasDefault>({
+        required: this._schema.required,
+        defaultValue: undefined,
+        fields: partialFields as PartialFieldsNoDefault<TFields>,
+        validators: [],
+      });
     }
     return new StructPrimitive<PartialFields<TFields>, TRequired, THasDefault>({
       required: this._schema.required,
@@ -214,18 +239,81 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TRequ
     });
   }
 
-  private _makeFieldOptional(field: AnyPrimitive): AnyPrimitive {
-    // Create a new primitive with required: false
-    // We access the _schema property if available, otherwise return as-is
-    const fieldAny = field as any;
-    if (fieldAny._schema && typeof fieldAny._schema === "object") {
-      const Constructor = field.constructor as new (schema: any) => AnyPrimitive;
+  private _makeFieldOptional(field: AnyPrimitive, stripDefaults?: boolean): AnyPrimitive {
+    const maybeStripped = stripDefaults ? this._stripDefaultsRecursively(field) : field;
+
+    // Create a new field with required: false, preserving its shape.
+    const fieldWithSchema = maybeStripped as { _schema?: Record<string, unknown> };
+    if (fieldWithSchema._schema && typeof fieldWithSchema._schema === "object") {
+      const Constructor = maybeStripped.constructor as new (schema: unknown) => AnyPrimitive;
       return new Constructor({
-        ...fieldAny._schema,
+        ...fieldWithSchema._schema,
         required: false,
       });
     }
-    return field;
+    return maybeStripped;
+  }
+
+  /**
+   * Recursively strips defaults from a primitive and nested child primitives.
+   * This is used by partial({ stripDefaults: true }) so omitted fields resolve to undefined.
+   */
+  private _stripDefaultsRecursively(field: AnyPrimitive): AnyPrimitive {
+    const fieldWithSchema = field as { _schema?: Record<string, unknown> };
+    if (!fieldWithSchema._schema || typeof fieldWithSchema._schema !== "object") {
+      return field;
+    }
+
+    const nextSchema: Record<string, unknown> = { ...fieldWithSchema._schema };
+
+    // Struct fields
+    if (
+      nextSchema["fields"] &&
+      typeof nextSchema["fields"] === "object" &&
+      !Array.isArray(nextSchema["fields"])
+    ) {
+      const nextFields: Record<string, AnyPrimitive> = {};
+      for (const key in nextSchema["fields"] as Record<string, AnyPrimitive>) {
+        const nestedField = (nextSchema["fields"] as Record<string, AnyPrimitive>)[key]!;
+        nextFields[key] = this._stripDefaultsRecursively(nestedField);
+      }
+      nextSchema["fields"] = nextFields;
+    }
+
+    // Array element primitive
+    if (nextSchema["element"] && typeof nextSchema["element"] === "object") {
+      nextSchema["element"] = this._stripDefaultsRecursively(nextSchema["element"] as AnyPrimitive);
+    }
+
+    // Either variants (array) / Union variants (record)
+    if (Array.isArray(nextSchema["variants"])) {
+      nextSchema["variants"] = (nextSchema["variants"] as readonly AnyPrimitive[]).map((variant) =>
+        this._stripDefaultsRecursively(variant)
+      );
+    } else if (nextSchema["variants"] && typeof nextSchema["variants"] === "object") {
+      const nextVariants: Record<string, AnyPrimitive> = {};
+      for (const key in nextSchema["variants"] as Record<string, AnyPrimitive>) {
+        const nestedVariant = (nextSchema["variants"] as Record<string, AnyPrimitive>)[key]!;
+        nextVariants[key] = this._stripDefaultsRecursively(nestedVariant);
+      }
+      nextSchema["variants"] = nextVariants;
+    }
+
+    // Tree root node primitive
+    if (nextSchema["root"] && typeof nextSchema["root"] === "object") {
+      nextSchema["root"] = this._stripDefaultsRecursively(nextSchema["root"] as AnyPrimitive);
+    }
+
+    // Clear known default carriers across primitives.
+    if ("defaultValue" in nextSchema) {
+      nextSchema["defaultValue"] = undefined;
+    }
+    if ("defaultInput" in nextSchema) {
+      nextSchema["defaultInput"] = undefined;
+    }
+
+    const Constructor = field.constructor as new (schema: unknown) => AnyPrimitive;
+    return new Constructor(nextSchema);
   }
 
   private _isRequiredWithoutDefault(field: AnyPrimitive): boolean {

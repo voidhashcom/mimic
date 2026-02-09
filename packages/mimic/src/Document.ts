@@ -115,12 +115,21 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   /**
    * An ops buffer that maintains a dedup index for O(1) lookups by path:kind.
    */
-  const makeOpsBuffer = () => {
-    let ops: Operation.Operation<any, any, any>[] = [];
+  type BufferedOperation = Operation.Operation<any, any, any>;
+  interface OpsBuffer {
+    push(op: BufferedOperation): void;
+    drain(): BufferedOperation[];
+    mergeFrom(other: OpsBuffer): void;
+    toArray(): readonly BufferedOperation[];
+    reset(): void;
+  }
+
+  const makeOpsBuffer = (): OpsBuffer => {
+    let ops: BufferedOperation[] = [];
     // Maps "encodedPath:kind" → array index for deduplicable ops
     let index = new Map<string, number>();
 
-    const dedupKey = (op: Operation.Operation<any, any, any>): string =>
+    const dedupKey = (op: BufferedOperation): string =>
       `${OperationPath.encode(op.path)}:${String(op.kind)}`;
 
     return {
@@ -151,7 +160,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
         return result;
       },
       /** Appends all ops from another buffer (used on tx commit). */
-      mergeFrom(other: ReturnType<typeof makeOpsBuffer>): void {
+      mergeFrom(other: OpsBuffer): void {
         for (const op of other.toArray()) {
           this.push(op);
         }

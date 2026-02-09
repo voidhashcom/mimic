@@ -175,9 +175,17 @@ export function runValidators<T>(value: T, validators: readonly { validate: (val
  * Returns true if a primitive can represent null as a meaningful value.
  * This is used to avoid pruning explicit null values for null-capable scalar unions.
  */
+type PrimitiveWithLiteral = AnyPrimitive & {
+  readonly _tag: "LiteralPrimitive";
+  readonly literal: unknown;
+};
+
+const isLiteralPrimitive = (primitive: AnyPrimitive): primitive is PrimitiveWithLiteral =>
+  primitive._tag === "LiteralPrimitive" && "literal" in primitive;
+
 export function primitiveAllowsNullValue(primitive: AnyPrimitive): boolean {
-  if (primitive._tag === "LiteralPrimitive") {
-    return (primitive as { literal: unknown }).literal === null;
+  if (isLiteralPrimitive(primitive)) {
+    return primitive.literal === null;
   }
 
   if (primitive._tag === "EitherPrimitive") {

@@ -1036,6 +1036,116 @@ describe("StructPrimitive", () => {
       expect(operations[0]!.kind).toBe("string.set");
       expect(operations[0]!.payload).toBe("Jane");
     });
+
+    it("partial({ stripDefaults: true }) clears field defaults", () => {
+      const structPrimitive = Primitive.Struct({
+        paddingTop: Primitive.Number().default(0),
+        name: Primitive.String().default("Anonymous"),
+        age: Primitive.Number(),
+      });
+
+      const partialPrimitive = structPrimitive.partial({ stripDefaults: true });
+
+      // getInitialState should return undefined since all defaults are stripped
+      expect(partialPrimitive._internal.getInitialState()).toBeUndefined();
+    });
+
+    it("partial({ stripDefaults: true }) toSnapshot returns undefined for unset fields", () => {
+      const env = ProxyEnvironment.make(() => {});
+
+      const structPrimitive = Primitive.Struct({
+        paddingTop: Primitive.Number().default(0),
+        name: Primitive.String().default("test"),
+      });
+
+      const partialPrimitive = structPrimitive.partial({ stripDefaults: true });
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      // With no state set, toSnapshot should return undefined (no defaults to fall back on)
+      expect(proxy.toSnapshot()).toBeUndefined();
+    });
+
+    it("partial({ stripDefaults: true }) strips nested struct defaults", () => {
+      const structPrimitive = Primitive.Struct({
+        profile: Primitive.Struct({
+          name: Primitive.String().default("Anonymous"),
+          age: Primitive.Number().default(0),
+        }),
+      });
+
+      const partialPrimitive = structPrimitive.partial({ stripDefaults: true });
+      expect(partialPrimitive._internal.getInitialState()).toBeUndefined();
+
+      const env = ProxyEnvironment.make(() => {});
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+      expect(proxy.toSnapshot()).toBeUndefined();
+    });
+
+    it("partial({ stripDefaults: true }) does not re-apply nested defaults during set()", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        profile: Primitive.Struct({
+          name: Primitive.String().default("Anonymous"),
+          age: Primitive.Number().default(0),
+        }),
+      });
+
+      const partialPrimitive = structPrimitive.partial({ stripDefaults: true });
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      proxy.set({ profile: {} });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+      expect(operations[0]!.payload).toEqual({ profile: {} });
+    });
+
+    it("partial({ stripDefaults: true }) keeps field proxies typed as possibly undefined", () => {
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().default("Anonymous"),
+      });
+
+      const partialPrimitive = structPrimitive.partial({ stripDefaults: true });
+      const env = ProxyEnvironment.make(() => {});
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      // Compile-time assertion: with defaults stripped, field access is optional.
+      const value: string | undefined = proxy.name.get();
+      expect(value).toBeUndefined();
+    });
+
+    it("partial() without stripDefaults preserves field defaults", () => {
+      const structPrimitive = Primitive.Struct({
+        paddingTop: Primitive.Number().default(0),
+        name: Primitive.String().default("Anonymous"),
+      });
+
+      const partialPrimitive = structPrimitive.partial();
+
+      // getInitialState should still return the defaults
+      expect(partialPrimitive._internal.getInitialState()).toEqual({
+        paddingTop: 0,
+        name: "Anonymous",
+      });
+    });
+
+    it("partial() without stripDefaults keeps field proxies typed as defined when defaults exist", () => {
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().default("Anonymous"),
+      });
+
+      const partialPrimitive = structPrimitive.partial();
+      const env = ProxyEnvironment.make(() => {});
+      const proxy = partialPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      // Compile-time assertion: without stripping defaults, field access remains defined.
+      const value: string = proxy.name.get();
+      expect(value).toBe("Anonymous");
+    });
   });
 });
 

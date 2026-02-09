@@ -47,7 +47,7 @@ function buildTransaction<TStore extends CommanderSlice, TSchema extends Primiti
     const state = storeApi.getState();
     const draft = state._commander.activeDraft;
     if (draft) {
-      draft.update(fn);
+      draft.update(fn as (root: unknown) => void);
     } else {
       // Access mimic.document from the store
       const mimic = (state as any).mimic;
@@ -374,7 +374,7 @@ export function performRedo<TStore extends CommanderSlice>(
  * Creates a dispatch function for use during undo/redo operations.
  * This dispatch does NOT add to undo stack (to avoid infinite loops).
  */
-function createDispatchForUndo<TStore>(
+function createDispatchForUndo<TStore extends CommanderSlice>(
   storeApi: StoreApi<TStore>
 ): CommandDispatch<TStore> {
   return <TParams, TReturn>(command: Command<TStore, TParams, TReturn>) => {

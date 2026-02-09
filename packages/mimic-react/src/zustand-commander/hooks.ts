@@ -34,7 +34,7 @@ function buildTransactionFromApi<TStore extends CommanderSlice, TSchema extends 
     const state = storeApi.getState();
     const draft = state._commander.activeDraft;
     if (draft) {
-      draft.update(fn);
+      draft.update(fn as (root: unknown) => void);
     } else {
       const mimic = (state as any).mimic;
       if (!mimic?.document) {
