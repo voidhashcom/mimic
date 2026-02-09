@@ -1878,5 +1878,104 @@ describe("ClientDocument Presence", () => {
 
       expect(transport.sentTransactions.length).toBe(0);
     });
+
+    it("should NEVER send transactions to server during draft.update() - explicit verification", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      // Track when transport.send is called
+      const sendCalls: Transaction.Transaction[] = [];
+      const originalSend = transport.send;
+      transport.send = (tx) => {
+        sendCalls.push(tx);
+        originalSend.call(transport, tx);
+      };
+
+      const draft = client.createDraft();
+
+      // Perform multiple updates
+      draft.update((root) => root.title.set("Update 1"));
+      expect(sendCalls.length).toBe(0);
+
+      draft.update((root) => root.count.set(10));
+      expect(sendCalls.length).toBe(0);
+
+      draft.update((root) => root.title.set("Update 2"));
+      expect(sendCalls.length).toBe(0);
+
+      draft.update((root) => {
+        root.title.set("Update 3");
+        root.count.set(20);
+      });
+      expect(sendCalls.length).toBe(0);
+
+      // Verify optimistic state is updated
+      expect(client.get()?.title).toBe("Update 3");
+      expect(client.get()?.count).toBe(20);
+
+      // Still no transactions sent
+      expect(sendCalls.length).toBe(0);
+      expect(transport.sentTransactions.length).toBe(0);
+
+      // Only after commit should transaction be sent
+      draft.commit();
+      expect(sendCalls.length).toBe(1);
+      expect(transport.sentTransactions.length).toBe(1);
+    });
+
+    it("should never call transport.send during draft lifecycle until commit", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      // Create a spy to track exact moments of transport.send calls
+      const sendTimestamps: { time: number; action: string }[] = [];
+      const originalSend = transport.send;
+      transport.send = (tx) => {
+        sendTimestamps.push({ time: Date.now(), action: "send" });
+        originalSend.call(transport, tx);
+      };
+
+      // Draft operations should NOT trigger send
+      const draft = client.createDraft();
+      expect(sendTimestamps.length).toBe(0);
+
+      draft.update((root) => root.title.set("Draft"));
+      expect(sendTimestamps.length).toBe(0);
+
+      // Regular transaction SHOULD trigger send
+      client.transaction((root) => root.count.set(5));
+      expect(sendTimestamps.length).toBe(1);
+
+      // More draft updates should NOT trigger send
+      draft.update((root) => root.title.set("Draft 2"));
+      expect(sendTimestamps.length).toBe(1);
+
+      // Commit SHOULD trigger send
+      draft.commit();
+      expect(sendTimestamps.length).toBe(2);
+    });
+
+    it("should not send transactions when draft is discarded", async () => {
+      const initialState: TestState = { title: "Hello", count: 0, items: [] };
+      const client = ClientDocument.make({ schema: TestSchema, transport, initialState });
+      await client.connect();
+
+      const draft = client.createDraft();
+      draft.update((root) => root.title.set("Will be discarded"));
+      draft.update((root) => root.count.set(999));
+
+      expect(transport.sentTransactions.length).toBe(0);
+
+      draft.discard();
+
+      // Still no transactions should be sent
+      expect(transport.sentTransactions.length).toBe(0);
+
+      // State should revert
+      expect(client.get()?.title).toBe("Hello");
+      expect(client.get()?.count).toBe(0);
+    });
   });
 });

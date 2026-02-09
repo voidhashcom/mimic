@@ -668,6 +668,327 @@ describe("Command Dispatch in Context", () => {
   });
 });
 
+describe("ctx.transaction routing (draft vs document)", () => {
+  it("should route ctx.transaction to document.transaction when no draft is active", () => {
+    const commander = createCommander<TestState>();
+
+    // Track calls to document.transaction
+    const transactionCalls: Array<(root: any) => void> = [];
+    const mockDocument = {
+      transaction: (fn: (root: any) => void) => {
+        transactionCalls.push(fn);
+      },
+    };
+
+    // Create store with mimic slice containing the mock document
+    const store = createStore<TestStore & { mimic: { document: typeof mockDocument } }>(
+      commander.middleware(() => ({
+        count: 0,
+        items: [],
+        selectedId: null,
+        mimic: { document: mockDocument },
+      }))
+    );
+
+    // Create a command that uses ctx.transaction
+    const updateViaTransaction = commander.action<{ value: number }>(
+      (ctx, params) => {
+        ctx.transaction((root: any) => {
+          root.count.set(params.value);
+        });
+      }
+    );
+
+    const storeApi = store as unknown as StoreApi<TestStore & { mimic: { document: typeof mockDocument } }>;
+
+    // Build a proper context with transaction routing
+    const ctx: CommandContext<TestStore> = {
+      getState: () => storeApi.getState(),
+      setState: (partial: Partial<TestStore>) => storeApi.setState(partial as any),
+      dispatch: <TParams, TReturn>(cmd: Command<TestStore, TParams, TReturn>) => {
+        return (params: TParams): TReturn => cmd.fn(ctx, params);
+      },
+      transaction: (fn: (root: any) => void) => {
+        const state = storeApi.getState();
+        const draft = state._commander.activeDraft;
+        if (draft) {
+          draft.update(fn);
+        } else {
+          (state as any).mimic.document.transaction(fn);
+        }
+      },
+    };
+
+    // Execute command - should route to document.transaction
+    updateViaTransaction.fn(ctx, { value: 42 });
+
+    expect(transactionCalls.length).toBe(1);
+  });
+
+  it("should route ctx.transaction to draft.update when draft is active", () => {
+    const commander = createCommander<TestState>();
+
+    // Track calls to both document.transaction and draft.update
+    const documentTransactionCalls: Array<(root: any) => void> = [];
+    const draftUpdateCalls: Array<(root: any) => void> = [];
+
+    const mockDocument = {
+      transaction: (fn: (root: any) => void) => {
+        documentTransactionCalls.push(fn);
+      },
+    };
+
+    const mockDraft = {
+      update: (fn: (root: any) => void) => {
+        draftUpdateCalls.push(fn);
+      },
+      commit: () => {},
+      discard: () => {},
+      id: "mock-draft-id",
+    };
+
+    // Create store with mimic slice
+    const store = createStore<TestStore & { mimic: { document: typeof mockDocument } }>(
+      commander.middleware(() => ({
+        count: 0,
+        items: [],
+        selectedId: null,
+        mimic: { document: mockDocument },
+      }))
+    );
+
+    // Set the active draft
+    store.setState((state) => ({
+      ...state,
+      _commander: {
+        ...state._commander,
+        activeDraft: mockDraft as any,
+      },
+    }));
+
+    // Create a command that uses ctx.transaction
+    const updateViaTransaction = commander.action<{ value: number }>(
+      (ctx, params) => {
+        ctx.transaction((root: any) => {
+          root.count.set(params.value);
+        });
+      }
+    );
+
+    const storeApi = store as unknown as StoreApi<TestStore & { mimic: { document: typeof mockDocument } }>;
+
+    // Build a proper context with transaction routing
+    const ctx: CommandContext<TestStore> = {
+      getState: () => storeApi.getState(),
+      setState: (partial: Partial<TestStore>) => storeApi.setState(partial as any),
+      dispatch: <TParams, TReturn>(cmd: Command<TestStore, TParams, TReturn>) => {
+        return (params: TParams): TReturn => cmd.fn(ctx, params);
+      },
+      transaction: (fn: (root: any) => void) => {
+        const state = storeApi.getState();
+        const draft = state._commander.activeDraft;
+        if (draft) {
+          draft.update(fn);
+        } else {
+          (state as any).mimic.document.transaction(fn);
+        }
+      },
+    };
+
+    // Execute command - should route to draft.update, NOT document.transaction
+    updateViaTransaction.fn(ctx, { value: 42 });
+
+    expect(draftUpdateCalls.length).toBe(1);
+    expect(documentTransactionCalls.length).toBe(0);
+  });
+
+  it("should never call document.transaction while draft is active (explicit verification)", () => {
+    const commander = createCommander<TestState>();
+
+    // Track ALL calls
+    const documentTransactionCalls: Array<{ fn: (root: any) => void; timestamp: number }> = [];
+    const draftUpdateCalls: Array<{ fn: (root: any) => void; timestamp: number }> = [];
+
+    const mockDocument = {
+      transaction: (fn: (root: any) => void) => {
+        documentTransactionCalls.push({ fn, timestamp: Date.now() });
+      },
+    };
+
+    const mockDraft = {
+      update: (fn: (root: any) => void) => {
+        draftUpdateCalls.push({ fn, timestamp: Date.now() });
+      },
+      commit: () => {},
+      discard: () => {},
+      id: "mock-draft-id",
+    };
+
+    // Create store
+    const store = createStore<TestStore & { mimic: { document: typeof mockDocument } }>(
+      commander.middleware(() => ({
+        count: 0,
+        items: [],
+        selectedId: null,
+        mimic: { document: mockDocument },
+      }))
+    );
+
+    const storeApi = store as unknown as StoreApi<TestStore & { mimic: { document: typeof mockDocument } }>;
+
+    // Helper to build context
+    const buildCtx = (): CommandContext<TestStore> => ({
+      getState: () => storeApi.getState(),
+      setState: (partial: Partial<TestStore>) => storeApi.setState(partial as any),
+      dispatch: <TParams, TReturn>(cmd: Command<TestStore, TParams, TReturn>) => {
+        return (params: TParams): TReturn => cmd.fn(buildCtx(), params);
+      },
+      transaction: (fn: (root: any) => void) => {
+        const state = storeApi.getState();
+        const draft = state._commander.activeDraft;
+        if (draft) {
+          draft.update(fn);
+        } else {
+          (state as any).mimic.document.transaction(fn);
+        }
+      },
+    });
+
+    // Command that uses transaction
+    const doUpdate = commander.action<{ value: number }>(
+      (ctx, params) => {
+        ctx.transaction((root: any) => {
+          root.count.set(params.value);
+        });
+      }
+    );
+
+    // Test 1: No draft - should go to document.transaction
+    doUpdate.fn(buildCtx(), { value: 1 });
+    expect(documentTransactionCalls.length).toBe(1);
+    expect(draftUpdateCalls.length).toBe(0);
+
+    // Test 2: Set active draft
+    store.setState((state) => ({
+      ...state,
+      _commander: {
+        ...state._commander,
+        activeDraft: mockDraft as any,
+      },
+    }));
+
+    // Test 3: With draft active - should go to draft.update
+    doUpdate.fn(buildCtx(), { value: 2 });
+    expect(documentTransactionCalls.length).toBe(1); // Still 1 - no new calls
+    expect(draftUpdateCalls.length).toBe(1);
+
+    // Test 4: Multiple updates while draft is active
+    doUpdate.fn(buildCtx(), { value: 3 });
+    doUpdate.fn(buildCtx(), { value: 4 });
+    doUpdate.fn(buildCtx(), { value: 5 });
+
+    expect(documentTransactionCalls.length).toBe(1); // Still 1 - no new calls
+    expect(draftUpdateCalls.length).toBe(4); // 4 draft updates
+
+    // Test 5: Clear draft
+    store.setState((state) => ({
+      ...state,
+      _commander: {
+        ...state._commander,
+        activeDraft: null,
+      },
+    }));
+
+    // Test 6: Without draft - should go back to document.transaction
+    doUpdate.fn(buildCtx(), { value: 6 });
+    expect(documentTransactionCalls.length).toBe(2);
+    expect(draftUpdateCalls.length).toBe(4);
+  });
+
+  it("should route nested command dispatches to draft when active", () => {
+    const commander = createCommander<TestState>();
+
+    const documentTransactionCalls: Array<(root: any) => void> = [];
+    const draftUpdateCalls: Array<(root: any) => void> = [];
+
+    const mockDocument = {
+      transaction: (fn: (root: any) => void) => {
+        documentTransactionCalls.push(fn);
+      },
+    };
+
+    const mockDraft = {
+      update: (fn: (root: any) => void) => {
+        draftUpdateCalls.push(fn);
+      },
+      commit: () => {},
+      discard: () => {},
+      id: "mock-draft-id",
+    };
+
+    const store = createStore<TestStore & { mimic: { document: typeof mockDocument } }>(
+      commander.middleware(() => ({
+        count: 0,
+        items: [],
+        selectedId: null,
+        mimic: { document: mockDocument },
+      }))
+    );
+
+    // Set active draft
+    store.setState((state) => ({
+      ...state,
+      _commander: {
+        ...state._commander,
+        activeDraft: mockDraft as any,
+      },
+    }));
+
+    const storeApi = store as unknown as StoreApi<TestStore & { mimic: { document: typeof mockDocument } }>;
+
+    const buildCtx = (): CommandContext<TestStore> => ({
+      getState: () => storeApi.getState(),
+      setState: (partial: Partial<TestStore>) => storeApi.setState(partial as any),
+      dispatch: <TParams, TReturn>(cmd: Command<TestStore, TParams, TReturn>) => {
+        return (params: TParams): TReturn => cmd.fn(buildCtx(), params);
+      },
+      transaction: (fn: (root: any) => void) => {
+        const state = storeApi.getState();
+        const draft = state._commander.activeDraft;
+        if (draft) {
+          draft.update(fn);
+        } else {
+          (state as any).mimic.document.transaction(fn);
+        }
+      },
+    });
+
+    // Inner command that uses transaction
+    const setCount = commander.action<{ value: number }>(
+      (ctx, params) => {
+        ctx.transaction((root: any) => {
+          root.count.set(params.value);
+        });
+      }
+    );
+
+    // Outer command that dispatches inner command
+    const setMultiple = commander.action<{ values: number[] }>(
+      (ctx, params) => {
+        for (const value of params.values) {
+          ctx.dispatch(setCount)({ value });
+        }
+      }
+    );
+
+    // Execute outer command - all nested transactions should go to draft
+    setMultiple.fn(buildCtx(), { values: [1, 2, 3, 4, 5] });
+
+    expect(draftUpdateCalls.length).toBe(5);
+    expect(documentTransactionCalls.length).toBe(0);
+  });
+});
+
 describe("Undo/Redo Integration", () => {
   it("should handle multiple undo operations", () => {
     const commander = createCommander<TestState>();

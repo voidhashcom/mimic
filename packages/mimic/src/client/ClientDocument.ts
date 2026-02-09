@@ -558,6 +558,9 @@ export const make = <
       ops: tx.ops,
       pendingCount: _pending.length + 1,
       isConnected: transport.isConnected(),
+      activeDraftCount: _drafts.size,
+      activeDraftIds: Array.from(_drafts.keys()),
+      callStack: new Error().stack?.split("\n").slice(1, 6).join("\n"),
     });
 
     const pending: PendingTransaction = {
@@ -1002,6 +1005,9 @@ export const make = <
         isConnected: transport.isConnected(),
         isReady: _initState.type === "ready",
         pendingCount: _pending.length,
+        activeDraftCount: _drafts.size,
+        activeDraftIds: Array.from(_drafts.keys()),
+        callStack: new Error().stack?.split("\n").slice(1, 6).join("\n"),
       });
 
       // Allow transactions even when disconnected - they will be queued
@@ -1176,6 +1182,13 @@ export const make = <
         id: draftId,
 
         update: (fn: (root: Primitive.InferProxy<TSchema>) => void): void => {
+          debugLog("draft.update: starting", {
+            draftId,
+            consumed,
+            currentOpsCount: draftState.ops.size,
+            pendingCount: _pending.length,
+          });
+
           if (consumed) {
             throw new InvalidStateError("Draft has already been committed or discarded.");
           }
@@ -1213,7 +1226,12 @@ export const make = <
             }
           }
 
-          debugLog("draft.update", { draftId, newOpsCount: tx.ops.length, totalOps: draftState.ops.size });
+          debugLog("draft.update: complete", {
+            draftId,
+            newOpsCount: tx.ops.length,
+            totalOps: draftState.ops.size,
+            note: "Ops stored in draft - NOT sent to server",
+          });
 
           // Recompute optimistic state to reflect draft changes
           recomputeOptimisticState();
@@ -1221,6 +1239,12 @@ export const make = <
         },
 
         commit: (): void => {
+          debugLog("draft.commit: starting", {
+            draftId,
+            consumed,
+            opsCount: draftState.ops.size,
+          });
+
           if (consumed) {
             throw new InvalidStateError("Draft has already been committed or discarded.");
           }
@@ -1229,7 +1253,11 @@ export const make = <
           const ops = Array.from(draftState.ops.values());
           _drafts.delete(draftId);
 
-          debugLog("draft.commit", { draftId, opsCount: ops.length });
+          debugLog("draft.commit: submitting", {
+            draftId,
+            opsCount: ops.length,
+            note: ops.length > 0 ? "Will call submitTransaction" : "Empty draft - no transaction",
+          });
 
           if (ops.length > 0) {
             const tx = Transaction.make(ops);
@@ -1243,6 +1271,12 @@ export const make = <
         },
 
         discard: (): void => {
+          debugLog("draft.discard: starting", {
+            draftId,
+            consumed,
+            opsCount: draftState.ops.size,
+          });
+
           if (consumed) {
             throw new InvalidStateError("Draft has already been committed or discarded.");
           }
@@ -1250,7 +1284,10 @@ export const make = <
 
           _drafts.delete(draftId);
 
-          debugLog("draft.discard", { draftId });
+          debugLog("draft.discard: complete", {
+            draftId,
+            note: "Draft discarded - no transaction sent to server",
+          });
 
           recomputeOptimisticState();
           notifyDraftChange();
