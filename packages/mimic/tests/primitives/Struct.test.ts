@@ -4,6 +4,9 @@ import * as ProxyEnvironment from "../../src/ProxyEnvironment";
 import * as OperationPath from "../../src/OperationPath";
 import * as Operation from "../../src/Operation";
 
+const hasOwn = (value: unknown, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
 describe("StructPrimitive", () => {
   describe("proxy", () => {
     it("nested field access returns field primitive proxy", () => {
@@ -83,7 +86,8 @@ describe("StructPrimitive", () => {
 
       expect(operations).toHaveLength(1);
       expect(operations[0]!.kind).toBe("struct.set");
-      expect(operations[0]!.payload).toEqual({ name: "John Doe", age: 30, email: undefined });
+      expect(operations[0]!.payload).toEqual({ name: "John Doe", age: 30 });
+      expect(hasOwn(operations[0]!.payload, "email")).toBe(false);
     });
 
     it("set() only requires fields that are required and without defaults", () => {
@@ -103,7 +107,48 @@ describe("StructPrimitive", () => {
 
       expect(operations).toHaveLength(1);
       expect(operations[0]!.kind).toBe("struct.set");
-      expect(operations[0]!.payload).toEqual({ name: "John Doe", age: 30, email: undefined });
+      expect(operations[0]!.payload).toEqual({ name: "John Doe", age: 30 });
+      expect(hasOwn(operations[0]!.payload, "email")).toBe(false);
+    });
+
+    it("set() prunes optional keys explicitly set to undefined", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        email: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+      proxy.set({ name: "Alice", email: undefined });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+      expect(operations[0]!.payload).toEqual({ name: "Alice" });
+      expect(hasOwn(operations[0]!.payload, "email")).toBe(false);
+    });
+
+    it("set() prunes optional keys explicitly set to null", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+        email: Primitive.String(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+      (proxy as any).set({ name: "Alice", email: null });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.set");
+      expect(operations[0]!.payload).toEqual({ name: "Alice" });
+      expect(hasOwn(operations[0]!.payload, "email")).toBe(false);
     });
 
     it("multiple field sets generate separate operations", () => {
@@ -388,7 +433,7 @@ describe("StructPrimitive", () => {
       expect(operations.map((op) => op.payload)).toContain("Doe");
     });
 
-    it("update() skips undefined values", () => {
+    it("update() emits struct.unset for undefined optional values", () => {
       const operations: Operation.Operation<any, any, any>[] = [];
       const env = ProxyEnvironment.make((op) => {
         operations.push(op);
@@ -403,8 +448,100 @@ describe("StructPrimitive", () => {
 
       proxy.update({ name: "John", email: undefined });
 
+      expect(operations).toHaveLength(2);
+      const nameOp = operations.find((op) => op.path.toTokens().join("/") === "name");
+      const unsetOp = operations.find((op) => op.path.toTokens().join("/") === "email");
+      expect(nameOp!.kind).toBe("string.set");
+      expect(nameOp!.payload).toBe("John");
+      expect(unsetOp!.kind).toBe("struct.unset");
+    });
+
+    it("update() removes existing optional key for undefined value", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        email: Primitive.String(),
+      });
+      let state: Primitive.InferState<typeof structPrimitive> | undefined = {
+        name: "John",
+        email: "john@example.com",
+      };
+
+      const env = ProxyEnvironment.make({
+        onOperation: (op) => {
+          operations.push(op);
+          state = structPrimitive._internal.applyOperation(state, op);
+        },
+        getState: () => state,
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+      proxy.update({ email: undefined });
+
       expect(operations).toHaveLength(1);
-      expect(operations[0]!.payload).toBe("John");
+      expect(operations[0]!.kind).toBe("struct.unset");
+      expect(state).toEqual({ name: "John" });
+      expect(hasOwn(state, "email")).toBe(false);
+    });
+
+    it("update() removes existing optional key for null value", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String(),
+        email: Primitive.String(),
+      });
+      let state: Primitive.InferState<typeof structPrimitive> | undefined = {
+        name: "John",
+        email: "john@example.com",
+      };
+
+      const env = ProxyEnvironment.make({
+        onOperation: (op) => {
+          operations.push(op);
+          state = structPrimitive._internal.applyOperation(state, op);
+        },
+        getState: () => state,
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+      (proxy as any).update({ email: null });
+
+      expect(operations).toHaveLength(1);
+      expect(operations[0]!.kind).toBe("struct.unset");
+      expect(state).toEqual({ name: "John" });
+      expect(hasOwn(state, "email")).toBe(false);
+    });
+
+    it("update() throws for undefined on required fields without defaults", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(() => proxy.update({ name: undefined as never })).toThrow(Primitive.ValidationError);
+      expect(operations).toHaveLength(0);
+    });
+
+    it("update() throws for null on required fields without defaults", () => {
+      const operations: Operation.Operation<any, any, any>[] = [];
+      const env = ProxyEnvironment.make((op) => {
+        operations.push(op);
+      });
+
+      const structPrimitive = Primitive.Struct({
+        name: Primitive.String().required(),
+      });
+
+      const proxy = structPrimitive._internal.createProxy(env, OperationPath.make(""));
+
+      expect(() => (proxy as any).update({ name: null })).toThrow(Primitive.ValidationError);
+      expect(operations).toHaveLength(0);
     });
 
     it("update() recursively updates nested structs", () => {

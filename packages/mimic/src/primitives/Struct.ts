@@ -6,7 +6,7 @@ import * as ProxyEnvironment from "../ProxyEnvironment";
 import * as Transform from "../Transform";
 import type { Primitive, PrimitiveInternal, MaybeUndefined, AnyPrimitive, Validator, InferState, InferProxy, InferSnapshot, NeedsValue, InferUpdateInput, InferSetInput } from "../Primitive";
 import { ValidationError } from "../Primitive";
-import { runValidators, applyDefaults } from "./shared";
+import { runValidators, applyDefaults, primitiveAllowsNullValue } from "./shared";
 
 // =============================================================================
 // Struct Set Input Types
@@ -142,6 +142,13 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TRequ
       apply: (payload) => payload,
       deduplicable: true,
     }),
+    unset: OperationDefinition.make({
+      kind: "struct.unset" as const,
+      payload: Schema.Unknown,
+      target: Schema.Unknown,
+      apply: (payload) => payload,
+      deduplicable: true,
+    }),
   };
 
   constructor(schema: StructPrimitiveSchema<TFields>) {
@@ -221,6 +228,14 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TRequ
     return field;
   }
 
+  private _isRequiredWithoutDefault(field: AnyPrimitive): boolean {
+    const fieldDefault = field._internal.getInitialState();
+    return (
+      (field as { _schema?: { required?: boolean } })._schema?.required === true &&
+      fieldDefault === undefined
+    );
+  }
+
   readonly _internal: PrimitiveInternal<InferStructState<TFields>, StructProxy<TFields, TRequired, THasDefault>> = {
     createProxy: (env: ProxyEnvironment.ProxyEnvironment, operationPath: OperationPath.OperationPath): StructProxy<TFields, TRequired, THasDefault> => {
       const fields = this._schema.fields;
@@ -270,12 +285,24 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TRequ
           for (const key in value) {
             if (Object.prototype.hasOwnProperty.call(value, key)) {
               const fieldValue = value[key as keyof TFields];
-              if (fieldValue === undefined) continue; // Skip undefined values
-
               const fieldPrimitive = fields[key as keyof TFields];
               if (!fieldPrimitive) continue; // Skip unknown fields
 
               const fieldPath = operationPath.append(key);
+
+              const shouldUnset =
+                fieldValue === undefined ||
+                (fieldValue === null && !primitiveAllowsNullValue(fieldPrimitive));
+              if (shouldUnset) {
+                if (this._isRequiredWithoutDefault(fieldPrimitive)) {
+                  throw new ValidationError(`Field "${key}" is required and cannot be null or undefined`);
+                }
+                env.addOperation(
+                  Operation.fromDefinition(fieldPath, this._opDefinitions.unset, null)
+                );
+                continue;
+              }
+
               const fieldProxy = fieldPrimitive._internal.createProxy(env, fieldPath);
 
               // Check if this is a nested struct and value is a plain object (partial update)
@@ -368,24 +395,32 @@ export class StructPrimitive<TFields extends Record<string, AnyPrimitive>, TRequ
         }
 
         const fieldPrimitive = this._schema.fields[fieldName]!;
-        const remainingPath = path.shift();
-        const fieldOperation = {
-          ...operation,
-          path: remainingPath,
-        };
-
         // Get the current field state
         const currentState = state ?? ({} as InferStructState<TFields>);
-        const currentFieldState = currentState[fieldName] as InferState<typeof fieldPrimitive> | undefined;
+        if (operation.kind === "struct.unset" && tokens.length === 1) {
+          if (this._isRequiredWithoutDefault(fieldPrimitive)) {
+            throw new ValidationError(`Field "${globalThis.String(fieldName)}" is required and cannot be removed`);
+          }
+          const mutableState = { ...currentState } as Record<string, unknown>;
+          delete mutableState[globalThis.String(fieldName)];
+          newState = mutableState as InferStructState<TFields>;
+        } else {
+          const remainingPath = path.shift();
+          const fieldOperation = {
+            ...operation,
+            path: remainingPath,
+          };
+          const currentFieldState = currentState[fieldName] as InferState<typeof fieldPrimitive> | undefined;
 
-        // Apply the operation to the field
-        const newFieldState = fieldPrimitive._internal.applyOperation(currentFieldState, fieldOperation);
+          // Apply the operation to the field
+          const newFieldState = fieldPrimitive._internal.applyOperation(currentFieldState, fieldOperation);
 
-        // Build updated state
-        newState = {
-          ...currentState,
-          [fieldName]: newFieldState,
-        };
+          // Build updated state
+          newState = {
+            ...currentState,
+            [fieldName]: newFieldState,
+          };
+        }
       }
 
       // Run validators on the new state
@@ -501,4 +536,3 @@ export const Struct = <TFields extends Record<string, AnyPrimitive>>(
   fields: TFields
 ): StructPrimitive<TFields, false, false> =>
   new StructPrimitive({ required: false, defaultValue: undefined, fields, validators: [] });
-

@@ -172,6 +172,23 @@ export function runValidators<T>(value: T, validators: readonly { validate: (val
 }
 
 /**
+ * Returns true if a primitive can represent null as a meaningful value.
+ * This is used to avoid pruning explicit null values for null-capable scalar unions.
+ */
+export function primitiveAllowsNullValue(primitive: AnyPrimitive): boolean {
+  if (primitive._tag === "LiteralPrimitive") {
+    return (primitive as { literal: unknown }).literal === null;
+  }
+
+  if (primitive._tag === "EitherPrimitive") {
+    const variants = (primitive as { _schema?: { variants?: readonly AnyPrimitive[] } })._schema?.variants;
+    return Array.isArray(variants) && variants.some((variant) => primitiveAllowsNullValue(variant));
+  }
+
+  return false;
+}
+
+/**
  * Checks if an operation is compatible with the given operation definitions.
  * @param operation - The operation to check.
  * @param operationDefinitions - The operation definitions to check against.
@@ -214,20 +231,50 @@ export function applyDefaults<T extends AnyPrimitive>(
     
     // Layer the provided values on top of initial state
     const result: Record<string, unknown> = { ...structInitialState, ...value };
+    const inputObject =
+      typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)
+        : undefined;
     
     for (const key in structPrimitive.fields) {
       const fieldPrimitive = structPrimitive.fields[key]!;
+      const hasExplicitKey = inputObject !== undefined && Object.prototype.hasOwnProperty.call(inputObject, key);
+      const explicitValue = hasExplicitKey ? inputObject[key] : undefined;
+      const fieldDefault = fieldPrimitive._internal.getInitialState();
+      const isRequiredWithoutDefault =
+        (fieldPrimitive as { _schema?: { required?: boolean } })._schema?.required === true &&
+        fieldDefault === undefined;
+
+      // Explicit undefined values always prune optional keys.
+      // Explicit null values prune optional keys unless null is a valid semantic value for this field.
+      // Required fields without defaults reject nullish values.
+      const shouldPruneExplicitNullish =
+        hasExplicitKey &&
+        (
+          explicitValue === undefined ||
+          (explicitValue === null && !primitiveAllowsNullValue(fieldPrimitive))
+        );
+      if (shouldPruneExplicitNullish) {
+        if (isRequiredWithoutDefault) {
+          throw new ValidationError(`Field "${key}" is required and cannot be null or undefined`);
+        }
+        delete result[key];
+        continue;
+      }
       
-      if (result[key] === undefined) {
+      if (!hasExplicitKey && result[key] === undefined) {
         // Field still not provided after merging - try individual field default
-        const fieldDefault = fieldPrimitive._internal.getInitialState();
         if (fieldDefault !== undefined) {
           result[key] = fieldDefault;
         }
-      } else if (typeof result[key] === "object" && result[key] !== null) {
+      } else if (
+        hasExplicitKey &&
+        typeof explicitValue === "object" &&
+        explicitValue !== null
+      ) {
         // Recursively apply defaults to nested structs and unions
         if (fieldPrimitive._tag === "StructPrimitive" || fieldPrimitive._tag === "UnionPrimitive") {
-          result[key] = applyDefaults(fieldPrimitive, result[key] as Partial<InferState<typeof fieldPrimitive>>);
+          result[key] = applyDefaults(fieldPrimitive, explicitValue as Partial<InferState<typeof fieldPrimitive>>);
         }
       }
     }
@@ -285,4 +332,3 @@ export function applyDefaults<T extends AnyPrimitive>(
   // For other primitives, return the value as-is
   return value as InferState<T>;
 }
-
