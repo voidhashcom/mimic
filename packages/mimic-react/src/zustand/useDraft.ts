@@ -2,7 +2,7 @@ import { useRef, useCallback, useEffect } from "react";
 import { useSyncExternalStore } from "react";
 import type { StoreApi } from "zustand";
 import type { ClientDocument } from "@voidhash/mimic/client";
-import type { Primitive } from "@voidhash/mimic";
+import type { Primitive, Presence } from "@voidhash/mimic";
 import type { MimicSlice } from "./types";
 import type { CommanderSlice } from "../zustand-commander/types";
 import { setActiveDraft, clearActiveDraft } from "../zustand-commander/commander";
@@ -31,7 +31,7 @@ export interface UseDraftReturn<TSchema extends Primitive.AnyPrimitive> {
  */
 export const useDraft = <
   TSchema extends Primitive.AnyPrimitive,
-  TPresence extends import("@voidhash/mimic").Presence.AnyPresence | undefined = undefined,
+  TPresence extends Presence.AnyPresence | undefined = undefined,
 >(
   store: StoreApi<MimicSlice<TSchema, TPresence> & CommanderSlice>
 ): UseDraftReturn<TSchema> => {

@@ -13,7 +13,7 @@
     "dev": "bun run --watch src/index.ts",
     "build": "bun build ./src/index.ts --outdir ./dist --target bun --env disable --sourcemap=external",
     "start": "bun run dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "@effect/cluster": "catalog:",

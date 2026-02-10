@@ -28,7 +28,7 @@
   "scripts": {
     "build": "tsdown",
     "lint": "biome check .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest run -c vitest.mts"
   },
   "dependencies": {
