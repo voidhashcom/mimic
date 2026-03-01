@@ -59,6 +59,18 @@ export const ListCollections = Rpc.make("ListCollections", {
   ),
 });
 
+export const UpdateCollectionSchema = Rpc.make("UpdateCollectionSchema", {
+  payload: {
+    id: Schema.String,
+    schemaJson: Schema.Unknown,
+  },
+  success: Schema.Struct({
+    id: Schema.String,
+    schemaVersion: Schema.Number,
+  }),
+  error: Schema.String,
+});
+
 export const DeleteCollection = Rpc.make("DeleteCollection", {
   payload: { id: Schema.String },
   success: Schema.Void,
@@ -71,7 +83,7 @@ export const CreateCredential = Rpc.make("CreateCredential", {
   payload: {
     databaseId: Schema.String,
     label: Schema.String,
-    permission: Schema.Union([Schema.Literal("read"), Schema.Literal("write")]),
+    permission: Schema.Union([Schema.Literal("read"), Schema.Literal("write"), Schema.Literal("admin")]),
   },
   success: Schema.Struct({
     id: Schema.String,
@@ -94,4 +106,75 @@ export const ListCredentials = Rpc.make("ListCredentials", {
 export const DeleteCredential = Rpc.make("DeleteCredential", {
   payload: { id: Schema.String },
   success: Schema.Void,
+});
+
+// Document RPCs
+
+const DocumentSnapshotSchema = Schema.Struct({
+  id: Schema.String,
+  collectionId: Schema.String,
+  state: Schema.Unknown,
+  version: Schema.Number,
+});
+
+export const CreateDocument = Rpc.make("CreateDocument", {
+  payload: {
+    collectionId: Schema.String,
+    id: Schema.optional(Schema.String),
+    data: Schema.Unknown,
+  },
+  success: DocumentSnapshotSchema,
+  error: Schema.String,
+});
+
+export const GetDocument = Rpc.make("GetDocument", {
+  payload: {
+    collectionId: Schema.String,
+    documentId: Schema.String,
+  },
+  success: DocumentSnapshotSchema,
+  error: Schema.String,
+});
+
+export const UpdateDocument = Rpc.make("UpdateDocument", {
+  payload: {
+    collectionId: Schema.String,
+    documentId: Schema.String,
+    data: Schema.Unknown,
+  },
+  success: Schema.Struct({
+    id: Schema.String,
+    version: Schema.Number,
+  }),
+  error: Schema.String,
+});
+
+export const SetDocument = Rpc.make("SetDocument", {
+  payload: {
+    collectionId: Schema.String,
+    documentId: Schema.String,
+    data: Schema.Unknown,
+  },
+  success: Schema.Struct({
+    id: Schema.String,
+    version: Schema.Number,
+  }),
+  error: Schema.String,
+});
+
+export const DeleteDocument = Rpc.make("DeleteDocument", {
+  payload: {
+    collectionId: Schema.String,
+    documentId: Schema.String,
+  },
+  success: Schema.Void,
+  error: Schema.String,
+});
+
+export const ListDocuments = Rpc.make("ListDocuments", {
+  payload: {
+    collectionId: Schema.String,
+  },
+  success: Schema.Array(DocumentSnapshotSchema),
+  error: Schema.String,
 });

@@ -10,6 +10,7 @@ import {
 import type { Scope } from "effect/Scope";
 import { Transaction } from "@voidhash/mimic";
 import { MimicDocumentEntity, type SubmitResult } from "./DocumentEntity";
+import { DocumentGatewayError } from "./Errors";
 import type * as Protocol from "./Protocol";
 import type { PresenceEntry } from "./Protocol";
 import type { PresenceEvent, PresenceSnapshot } from "./Presence";
@@ -23,31 +24,31 @@ export interface DocumentGateway {
   readonly getSnapshot: (
     collectionId: string,
     documentId: string,
-  ) => Effect.Effect<{ state: unknown; version: number }>;
+  ) => Effect.Effect<{ state: unknown; version: number }, DocumentGatewayError>;
   readonly getTreeSnapshot: (
     collectionId: string,
     documentId: string,
-  ) => Effect.Effect<unknown>;
+  ) => Effect.Effect<unknown, DocumentGatewayError>;
   readonly subscribe: (
     collectionId: string,
     documentId: string,
   ) => Effect.Effect<Stream.Stream<Protocol.ServerMessage>, never, Scope>;
-  readonly touch: (collectionId: string, documentId: string) => Effect.Effect<void>;
+  readonly touch: (collectionId: string, documentId: string) => Effect.Effect<void, DocumentGatewayError>;
   readonly getPresenceSnapshot: (
     collectionId: string,
     documentId: string,
-  ) => Effect.Effect<PresenceSnapshot>;
+  ) => Effect.Effect<PresenceSnapshot, DocumentGatewayError>;
   readonly setPresence: (
     collectionId: string,
     documentId: string,
     connectionId: string,
     entry: PresenceEntry,
-  ) => Effect.Effect<void>;
+  ) => Effect.Effect<void, DocumentGatewayError>;
   readonly removePresence: (
     collectionId: string,
     documentId: string,
     connectionId: string,
-  ) => Effect.Effect<void>;
+  ) => Effect.Effect<void, DocumentGatewayError>;
   readonly subscribePresence: (
     collectionId: string,
     documentId: string,
@@ -96,6 +97,9 @@ export const DocumentGatewayLive = Layer.effect(
     const entityId = (collectionId: string, documentId: string) =>
       `${collectionId}:${documentId}`;
 
+    const mapClusterError = (operation: string) => (cause: unknown) =>
+      new DocumentGatewayError({ message: `Cluster error during ${operation}`, cause });
+
     const gateway: DocumentGateway = {
       submit: (collectionId, documentId, transaction) =>
         Effect.gen(function* () {
@@ -128,13 +132,17 @@ export const DocumentGatewayLive = Layer.effect(
       getSnapshot: (collectionId, documentId) =>
         Effect.gen(function* () {
           const client = makeClient(entityId(collectionId, documentId));
-          return yield* client.GetSnapshot(undefined as void).pipe(Effect.orDie);
+          return yield* client.GetSnapshot(undefined as void).pipe(
+            Effect.mapError(mapClusterError("GetSnapshot")),
+          );
         }),
 
       getTreeSnapshot: (collectionId, documentId) =>
         Effect.gen(function* () {
           const client = makeClient(entityId(collectionId, documentId));
-          return yield* client.GetTreeSnapshot(undefined as void).pipe(Effect.orDie);
+          return yield* client.GetTreeSnapshot(undefined as void).pipe(
+            Effect.mapError(mapClusterError("GetTreeSnapshot")),
+          );
         }),
 
       subscribe: (collectionId, documentId) =>
@@ -146,19 +154,25 @@ export const DocumentGatewayLive = Layer.effect(
       touch: (collectionId, documentId) =>
         Effect.gen(function* () {
           const client = makeClient(entityId(collectionId, documentId));
-          yield* client.Touch(undefined as void).pipe(Effect.orDie);
+          yield* client.Touch(undefined as void).pipe(
+            Effect.mapError(mapClusterError("Touch")),
+          );
         }),
 
       getPresenceSnapshot: (collectionId, documentId) =>
         Effect.gen(function* () {
           const client = makeClient(entityId(collectionId, documentId));
-          return yield* client.GetPresenceSnapshot(undefined as void).pipe(Effect.orDie);
+          return yield* client.GetPresenceSnapshot(undefined as void).pipe(
+            Effect.mapError(mapClusterError("GetPresenceSnapshot")),
+          );
         }),
 
       setPresence: (collectionId, documentId, connectionId, entry) =>
         Effect.gen(function* () {
           const client = makeClient(entityId(collectionId, documentId));
-          yield* client.SetPresence({ connectionId, entry }).pipe(Effect.orDie);
+          yield* client.SetPresence({ connectionId, entry }).pipe(
+            Effect.mapError(mapClusterError("SetPresence")),
+          );
 
           const pubsub = yield* getOrCreatePresencePubSub(entityId(collectionId, documentId));
           yield* PubSub.publish(pubsub, {
@@ -172,7 +186,9 @@ export const DocumentGatewayLive = Layer.effect(
       removePresence: (collectionId, documentId, connectionId) =>
         Effect.gen(function* () {
           const client = makeClient(entityId(collectionId, documentId));
-          yield* client.RemovePresence({ connectionId }).pipe(Effect.orDie);
+          yield* client.RemovePresence({ connectionId }).pipe(
+            Effect.mapError(mapClusterError("RemovePresence")),
+          );
 
           const pubsub = yield* getOrCreatePresencePubSub(entityId(collectionId, documentId));
           yield* PubSub.publish(pubsub, {

@@ -125,7 +125,10 @@ export const createEntityHandler = Effect.gen(function* () {
 
   // Load collection schema from MySQL
   const collectionRepo = yield* CollectionRepositoryTag;
-  const collection = yield* collectionRepo.findById(collectionId).pipe(Effect.orDie);
+  const collection = yield* collectionRepo.findById(collectionId).pipe(
+    Effect.mapError((cause) => new Error(`Failed to load collection ${collectionId}: ${cause}`)),
+    Effect.orDie,
+  );
   if (!collection) {
     return yield* Effect.die(new Error(`Collection not found: ${collectionId}`));
   }
@@ -139,13 +142,19 @@ export const createEntityHandler = Effect.gen(function* () {
   const hotStorage = makeMysqlHotStorage(docRepo);
 
   // Ensure document exists in metadata table
-  const existingDoc = yield* docRepo.findById(documentId).pipe(Effect.orDie);
+  const existingDoc = yield* docRepo.findById(documentId).pipe(
+    Effect.mapError((cause) => new Error(`Failed to check document ${documentId}: ${cause}`)),
+    Effect.orDie,
+  );
   if (!existingDoc) {
-    yield* docRepo.create(documentId, collectionId).pipe(Effect.orDie);
+    yield* docRepo.create(documentId, collectionId).pipe(
+      Effect.mapError((cause) => new Error(`Failed to create document ${documentId}: ${cause}`)),
+      Effect.orDie,
+    );
   }
 
-  // Schema version
-  const SCHEMA_VERSION = 1;
+  // Schema version from collection
+  const SCHEMA_VERSION = collection.schemaVersion;
 
   // Load snapshot from cold storage
   const storedDoc = yield* coldStorage.load(documentId).pipe(Effect.orDie);

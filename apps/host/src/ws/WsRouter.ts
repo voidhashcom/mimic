@@ -73,9 +73,11 @@ const handleWebSocketConnection = (
             Protocol.presenceSnapshotMessage(connectionId, presenceSnapshot.presences),
           );
         } else {
-          yield* sendMessage(
-            Protocol.authResultFailure(result.failure.reason ?? "Authentication failed"),
-          );
+          const failReason =
+            result.failure._tag === "AuthenticationError"
+              ? result.failure.reason
+              : "Authentication failed";
+          yield* sendMessage(Protocol.authResultFailure(failReason));
         }
       });
 
@@ -97,7 +99,7 @@ const handleWebSocketConnection = (
               yield* sendMessage(Protocol.errorMessage(message.transaction.id, "Not authenticated"));
               return;
             }
-            if (state.authContext?.permission !== "write") {
+            if (state.authContext?.permission !== "write" && state.authContext?.permission !== "admin") {
               yield* sendMessage(
                 Protocol.errorMessage(message.transaction.id, "Write permission required"),
               );
@@ -118,7 +120,7 @@ const handleWebSocketConnection = (
 
           case "presence_set":
             if (!state.authenticated || !state.authContext) return;
-            if (state.authContext.permission !== "write") return;
+            if (state.authContext.permission !== "write" && state.authContext.permission !== "admin") return;
 
             yield* gateway.setPresence(collectionId, documentId, connectionId, {
               data: message.data,
@@ -180,7 +182,9 @@ const handleWebSocketConnection = (
         yield* Fiber.interrupt(presenceFiber);
 
         if (state.hasPresence) {
-          yield* gateway.removePresence(collectionId, documentId, connectionId);
+          yield* gateway.removePresence(collectionId, documentId, connectionId).pipe(
+            Effect["catch"]((e) => Effect.logWarning("Failed to remove presence on disconnect", e)),
+          );
         }
       }),
     );

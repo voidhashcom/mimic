@@ -13,7 +13,7 @@ export interface DatabaseCredential {
   readonly databaseId: string;
   readonly label: string;
   readonly tokenHash: string;
-  readonly permission: "read" | "write";
+  readonly permission: "read" | "write" | "admin";
   readonly createdAt: Date;
 }
 

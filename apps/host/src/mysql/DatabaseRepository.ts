@@ -14,7 +14,7 @@ export interface DatabaseRepository {
     databaseId: string,
     label: string,
     tokenHash: string,
-    permission: "read" | "write",
+    permission: "read" | "write" | "admin",
   ) => Effect.Effect<void, SqlError>;
   readonly findCredentialByTokenHash: (tokenHash: string) => Effect.Effect<DatabaseCredential | undefined, SqlError>;
   readonly listCredentials: (databaseId: string) => Effect.Effect<readonly DatabaseCredential[], SqlError>;

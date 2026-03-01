@@ -1,6 +1,6 @@
 import { Effect, Layer, ServiceMap } from "effect";
 import { DatabaseRepositoryTag } from "../mysql/DatabaseRepository";
-import { AuthenticationError } from "../engine/Errors";
+import { AuthenticationError, AuthServiceError } from "../engine/Errors";
 import type { Permission } from "../engine/Protocol";
 
 export interface AuthContext {
@@ -15,7 +15,7 @@ export interface AuthService {
     token: string,
     databaseId: string,
     documentId: string,
-  ) => Effect.Effect<AuthContext, AuthenticationError>;
+  ) => Effect.Effect<AuthContext, AuthenticationError | AuthServiceError>;
 }
 
 export class AuthServiceTag extends ServiceMap.Service<AuthServiceTag, AuthService>()(
@@ -39,7 +39,9 @@ export const AuthServiceLive = Layer.effect(
             .map((b) => b.toString(16).padStart(2, "0"))
             .join("");
 
-          const credential = yield* dbRepo.findCredentialByTokenHash(tokenHash).pipe(Effect.orDie);
+          const credential = yield* dbRepo.findCredentialByTokenHash(tokenHash).pipe(
+            Effect.mapError((cause) => new AuthServiceError({ message: "Database lookup failed during authentication", cause })),
+          );
           if (!credential) {
             return yield* Effect.fail(new AuthenticationError({ reason: "Invalid token" }));
           }

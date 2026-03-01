@@ -1,0 +1,66 @@
+import type { ManagedRuntime } from "effect";
+import { type Primitive, SchemaJSON } from "@voidhash/mimic";
+import { DatabaseHandle as EffectDatabaseHandle } from "../effect/DatabaseHandle";
+import type { HttpTransport } from "../effect/HttpTransport";
+import type { MimicSDKError } from "../effect/errors";
+import type { CollectionInfo, CredentialInfo, CreatedCredential } from "../effect/types";
+import { CollectionHandle } from "./CollectionHandle";
+
+export class DatabaseHandle {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string | null;
+  private readonly _effect: EffectDatabaseHandle;
+  private readonly _runtime: ManagedRuntime.ManagedRuntime<HttpTransport, MimicSDKError>;
+
+  constructor(
+    id: string,
+    name: string,
+    description: string | null,
+    runtime: ManagedRuntime.ManagedRuntime<HttpTransport, MimicSDKError>,
+  ) {
+    this.id = id;
+    this.name = name;
+    this.description = description;
+    this._effect = new EffectDatabaseHandle(id, name, description);
+    this._runtime = runtime;
+  }
+
+  async createCollection<TSchema extends Primitive.AnyPrimitive>(
+    name: string,
+    schema: TSchema,
+  ): Promise<CollectionHandle<TSchema>> {
+    const info = await this._runtime.runPromise(this._effect.createCollection(name, schema));
+    return new CollectionHandle<TSchema>(info.id, info.databaseId, schema, this._runtime);
+  }
+
+  async listCollections(): Promise<CollectionInfo[]> {
+    return this._runtime.runPromise(this._effect.listCollections());
+  }
+
+  async deleteCollection(id: string): Promise<void> {
+    return this._runtime.runPromise(this._effect.deleteCollection(id));
+  }
+
+  collection<TSchema extends Primitive.AnyPrimitive>(
+    id: string,
+    schema: TSchema,
+  ): CollectionHandle<TSchema> {
+    return new CollectionHandle<TSchema>(id, this.id, schema, this._runtime);
+  }
+
+  async createCredential(options: {
+    label: string;
+    permission: "read" | "write" | "admin";
+  }): Promise<CreatedCredential> {
+    return this._runtime.runPromise(this._effect.createCredential(options));
+  }
+
+  async listCredentials(): Promise<CredentialInfo[]> {
+    return this._runtime.runPromise(this._effect.listCredentials());
+  }
+
+  async deleteCredential(id: string): Promise<void> {
+    return this._runtime.runPromise(this._effect.deleteCredential(id));
+  }
+}

@@ -41,7 +41,7 @@ export type ClientMessage =
 
 // Server -> Client Messages
 
-export type Permission = "read" | "write";
+export type Permission = "read" | "write" | "admin";
 
 export interface PresenceEntry {
   readonly data: unknown;

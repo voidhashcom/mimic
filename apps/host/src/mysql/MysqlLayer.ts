@@ -1,6 +1,7 @@
 import { Config, Layer, Redacted } from "effect";
 import { MysqlClient, MysqlMigrator } from "@effect/sql-mysql2";
 import migration0001 from "./migrations/0001_initial";
+import migration0002 from "./migrations/0002_schema_versions";
 
 const MysqlClientLive = MysqlClient.layerConfig(
   Config.all({
@@ -17,6 +18,7 @@ const MysqlClientLive = MysqlClient.layerConfig(
 const MysqlMigratorLive = MysqlMigrator.layer({
   loader: MysqlMigrator.fromRecord({
     "0001_initial": migration0001,
+    "0002_schema_versions": migration0002,
   }),
 });
 

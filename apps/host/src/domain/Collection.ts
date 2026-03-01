@@ -5,6 +5,7 @@ export interface Collection {
   readonly databaseId: string;
   readonly name: string;
   readonly schemaJson: unknown;
+  readonly schemaVersion: number;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
