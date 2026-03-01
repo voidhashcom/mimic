@@ -171,7 +171,7 @@ export class UnionPrimitive<TVariants extends UnionVariants, TDiscriminator exte
           // Apply defaults for the variant
           const merged = this._applyVariantDefaults(value as Partial<InferUnionState<TVariants>>);
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, merged)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, merged)
           );
         },
         as: <K extends keyof TVariants>(variant: K): InferProxy<TVariants[K]> => {

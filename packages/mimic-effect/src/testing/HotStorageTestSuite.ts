@@ -659,16 +659,16 @@ const tests: StorageTestCase<HotStorageTestError, HotStorageTag>[] = [
       const storage = yield* HotStorageTag;
       yield* storage.appendWithCheck("gap-check-fail", makeEntry(1), 1);
       // Attempt to append version 3, skipping version 2
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         storage.appendWithCheck("gap-check-fail", makeEntry(3), 3)
       );
       yield* assertTrue(
-        result._tag === "Left",
+        result._tag === "Failure",
         "appendWithCheck should fail when there's a version gap"
       );
-      if (result._tag === "Left") {
+      if (result._tag === "Failure") {
         yield* assertTrue(
-          result.left._tag === "WalVersionGapError",
+          result.failure._tag === "WalVersionGapError",
           "Error should be WalVersionGapError"
         );
       }
@@ -685,16 +685,16 @@ const tests: StorageTestCase<HotStorageTestError, HotStorageTag>[] = [
     run: Effect.gen(function* () {
       const storage = yield* HotStorageTag;
       // Attempt to append version 2 as first entry (expecting gap error)
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         storage.appendWithCheck("gap-check-not-first", makeEntry(2), 2)
       );
       yield* assertTrue(
-        result._tag === "Left",
+        result._tag === "Failure",
         "appendWithCheck should fail when first entry is not version 1"
       );
-      if (result._tag === "Left") {
+      if (result._tag === "Failure") {
         yield* assertTrue(
-          result.left._tag === "WalVersionGapError",
+          result.failure._tag === "WalVersionGapError",
           "Error should be WalVersionGapError"
         );
       }
@@ -711,11 +711,11 @@ const tests: StorageTestCase<HotStorageTestError, HotStorageTag>[] = [
       const storage = yield* HotStorageTag;
       yield* storage.appendWithCheck("gap-check-duplicate", makeEntry(1), 1);
       // Attempt to append another version 1
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         storage.appendWithCheck("gap-check-duplicate", makeEntry(1), 1)
       );
       yield* assertTrue(
-        result._tag === "Left",
+        result._tag === "Failure",
         "appendWithCheck should fail when version already exists"
       );
       // Verify still only one entry
@@ -774,13 +774,13 @@ const tests: StorageTestCase<HotStorageTestError, HotStorageTag>[] = [
       // Truncate (to establish empty WAL scenario)
       yield* storage.truncate("gap-base-detect", 5);
       // Try to append version 7 with baseVersion=5 (skipping version 6)
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         storage.appendWithCheck("gap-base-detect", makeEntry(7), 7, 5)
       );
-      yield* assertTrue(result._tag === "Left", "Should fail when skipping version 6");
-      if (result._tag === "Left") {
+      yield* assertTrue(result._tag === "Failure", "Should fail when skipping version 6");
+      if (result._tag === "Failure") {
         yield* assertTrue(
-          result.left._tag === "WalVersionGapError",
+          result.failure._tag === "WalVersionGapError",
           "Error should be WalVersionGapError"
         );
       }
@@ -1137,11 +1137,11 @@ export const runAll = (): Effect.Effect<
     }> = [];
 
     for (const test of tests) {
-      const result = yield* Effect.either(test.run);
-      if (result._tag === "Right") {
+      const result = yield* Effect.result(test.run);
+      if (result._tag === "Success") {
         passed.push(test);
       } else {
-        failed.push({ test, error: result.left });
+        failed.push({ test, error: result.failure });
       }
     }
 

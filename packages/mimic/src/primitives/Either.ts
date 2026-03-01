@@ -271,12 +271,12 @@ export class EitherPrimitive<TVariants extends readonly ScalarPrimitive[], TRequ
         },
         set: (value: InferSetInput<TVariants, TRequired, THasDefault>) => {
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, value)
           );
         },
         update: (value: InferUpdateInput<TVariants, TRequired, THasDefault>) => {
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, value)
           );
         },
         match: <R,>(handlers: EitherMatchHandlers<R>): R | undefined => {

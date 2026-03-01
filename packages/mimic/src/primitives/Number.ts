@@ -127,12 +127,12 @@ export class NumberPrimitive<TRequired extends boolean = false, THasDefault exte
         },
         set: (value: InferSetInput<TRequired, THasDefault>) => {
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, value)
           );
         },
         update: (value: InferUpdateInput<TRequired, THasDefault>) => {
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, value)
           );
         },
         toSnapshot: (): MaybeUndefined<number, TRequired, THasDefault> => {

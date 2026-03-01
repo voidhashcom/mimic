@@ -29,9 +29,9 @@
       "packages/*"
     ],
     "catalog": {
-      "effect": "^3.19.12",
-      "@effect/platform": "^0.93.8",
-      "@effect/platform-bun": "^0.86.0"
+      "effect": "4.0.0-beta.21",
+      "@effect/platform-bun": "4.0.0-beta.21",
+      "@effect/vitest": "4.0.0-beta.21"
     }
   }
 }

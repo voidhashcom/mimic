@@ -1,4 +1,4 @@
-import { Console, Effect, Layer } from "effect";
+import { Console, Effect, Layer, ServiceMap } from "effect";
 import {
   MimicServerEngine,
   MimicServerEngineTag,
@@ -11,13 +11,15 @@ import {
   MimicExampleSchema,
   PresenceSchema,
 } from "@voidhash/mimic-example-shared";
-import { HttpLayerRouter } from "@effect/platform";
+import { HttpRouter } from "effect/unstable/http";
 
 // Service used by initial function
-class SomeTestService extends Effect.Service<SomeTestService>()(
+class SomeTestService extends ServiceMap.Service<SomeTestService, {
+  readonly hello: (name: string) => Effect.Effect<string>;
+}>()(
   "app/SomeTestService",
   {
-    effect: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       const hello = (name: string) =>
         Effect.gen(function* () {
           yield* Console.log(`Hello ${name}!`);
@@ -25,9 +27,10 @@ class SomeTestService extends Effect.Service<SomeTestService>()(
         });
       return { hello } as const;
     }),
-    dependencies: [],
   }
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 // Custom auth layer - v2 API
 // Allows all tokens with write permission
@@ -51,7 +54,7 @@ const StorageLayers = Layer.mergeAll(
 
 // Create Engine layer with service access
 // We use Layer.unwrapEffect to create a layer that accesses services at creation time
-const EngineLive: Layer.Layer<MimicServerEngineTag> = Layer.unwrapEffect(
+const EngineLive: Layer.Layer<MimicServerEngineTag> = Layer.unwrap(
   Effect.gen(function* () {
     // Access SomeTestService at engine creation time
     const someRandomService = yield* SomeTestService;
@@ -81,7 +84,7 @@ const EngineLive: Layer.Layer<MimicServerEngineTag> = Layer.unwrapEffect(
     });
   })
 ).pipe(
-  Layer.provide(SomeTestService.Default),
+  Layer.provide(SomeTestService.layer),
   Layer.provide(StorageLayers),
   Layer.provide(CustomAuthLayer)
 );
@@ -101,11 +104,11 @@ const MimicLive = MimicRoute.pipe(
 // Compose routes with CORS
 const AllRoutes = Layer.mergeAll(MimicLive).pipe(
   Layer.provide(
-    HttpLayerRouter.cors({
+    HttpRouter.cors({
       allowedOrigins: ["http://localhost:3000"],
       credentials: true,
     })
   )
 );
 
-export const AppLive = HttpLayerRouter.serve(AllRoutes);
+export const AppLive = HttpRouter.serve(AllRoutes);

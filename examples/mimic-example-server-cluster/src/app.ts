@@ -26,8 +26,8 @@ import {
   MimicExampleSchema,
   PresenceSchema,
 } from "@voidhash/mimic-example-shared";
-import { HttpLayerRouter } from "@effect/platform";
-import { TestRunner } from "@effect/cluster";
+import { HttpRouter } from "effect/unstable/http";
+import { TestRunner } from "effect/unstable/cluster";
 
 // Custom auth layer - v2 API
 // Allows all tokens with write permission
@@ -89,11 +89,11 @@ const MimicLive = MimicRoute.pipe(
 // Compose routes with CORS
 const AllRoutes = Layer.mergeAll(MimicLive).pipe(
   Layer.provide(
-    HttpLayerRouter.cors({
+    HttpRouter.cors({
       allowedOrigins: ["http://localhost:3000"],
       credentials: true,
     })
   )
 );
 
-export const AppLive = HttpLayerRouter.serve(AllRoutes);
+export const AppLive = HttpRouter.serve(AllRoutes);

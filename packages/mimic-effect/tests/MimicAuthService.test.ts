@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Effect, Layer, Context } from "effect";
+import { Effect, Layer, ServiceMap } from "effect";
 import {
   MimicAuthService,
   MimicAuthServiceTag,
@@ -105,10 +105,9 @@ describe("MimicAuthService", () => {
   describe("make (custom)", () => {
     it("should allow custom implementation with service access", async () => {
       // Create a mock service
-      class MockDatabaseTag extends Context.Tag("MockDatabase")<
-        MockDatabaseTag,
+      class MockDatabaseTag extends ServiceMap.Service<MockDatabaseTag,
         { getPermission: (userId: string) => Effect.Effect<"read" | "write"> }
-      >() {}
+      >()("MockDatabase") {}
 
       const mockDbLayer = Layer.succeed(MockDatabaseTag, {
         getPermission: (userId: string) =>

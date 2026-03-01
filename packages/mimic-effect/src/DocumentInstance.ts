@@ -186,11 +186,11 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
     // Track metrics
     if (storedDoc) {
-      yield* Metric.increment(Metrics.documentsRestored);
+      yield* Metric.update(Metrics.documentsRestored, 1);
     } else {
-      yield* Metric.increment(Metrics.documentsCreated);
+      yield* Metric.update(Metrics.documentsCreated, 1);
     }
-    yield* Metric.incrementBy(Metrics.documentsActive, 1);
+    yield* Metric.update(Metrics.documentsActive, 1);
 
     // ==========================================================================
     // Instance Methods
@@ -252,7 +252,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
       // Track snapshot metrics
       const snapshotDuration = Date.now() - snapshotStartTime;
-      yield* Metric.increment(Metrics.storageSnapshots);
+      yield* Metric.update(Metrics.storageSnapshots, 1);
       yield* Metric.update(Metrics.storageSnapshotLatency, snapshotDuration);
 
       // Update tracking BEFORE truncate (for idempotency on retry)
@@ -261,7 +261,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       yield* Ref.set(transactionsSinceSnapshotRef, 0);
 
       // Truncate WAL - non-fatal, will be retried on next snapshot
-      yield* Effect.catchAll(hotStorage.truncate(documentId, snapshotResult.version), (e) =>
+      yield* Effect["catch"](hotStorage.truncate(documentId, snapshotResult.version), (e) =>
         Effect.logWarning("WAL truncate failed - will retry on next snapshot", {
           documentId,
           version: snapshotResult.version,
@@ -291,7 +291,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       const validation = document.validate(transaction);
 
       if (!validation.valid) {
-        yield* Metric.increment(Metrics.transactionsRejected);
+        yield* Metric.update(Metrics.transactionsRejected, 1);
         const latency = Date.now() - submitStartTime;
         yield* Metric.update(Metrics.transactionsLatency, latency);
 
@@ -312,17 +312,17 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       // This ensures correct validation after truncation or restart
       const snapshotVersion = yield* Ref.get(lastSnapshotVersionRef);
 
-      const appendResult = yield* Effect.either(
+      const appendResult = yield* Effect.result(
         hotStorage.appendWithCheck(documentId, walEntry, validation.nextVersion, snapshotVersion)
       );
 
-      if (appendResult._tag === "Left") {
+      if (appendResult._tag === "Failure") {
         yield* Effect.logError("WAL append failed", {
           documentId,
           version: validation.nextVersion,
-          error: appendResult.left,
+          error: appendResult.failure,
         });
-        yield* Metric.increment(Metrics.walAppendFailures);
+        yield* Metric.update(Metrics.walAppendFailures, 1);
 
         const latency = Date.now() - submitStartTime;
         yield* Metric.update(Metrics.transactionsLatency, latency);
@@ -339,8 +339,8 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
       // Track metrics
       const latency = Date.now() - submitStartTime;
       yield* Metric.update(Metrics.transactionsLatency, latency);
-      yield* Metric.increment(Metrics.transactionsProcessed);
-      yield* Metric.increment(Metrics.storageWalAppends);
+      yield* Metric.update(Metrics.transactionsProcessed, 1);
+      yield* Metric.update(Metrics.storageWalAppends, 1);
 
       // Increment transaction count
       yield* Ref.update(transactionsSinceSnapshotRef, (n) => n + 1);
@@ -425,7 +425,7 @@ const verifyWalContinuity = Effect.fn("document.wal.verify")(function* (
       firstWalVersion,
       expectedFirst,
     });
-    yield* Metric.increment(Metrics.storageVersionGaps);
+    yield* Metric.update(Metrics.storageVersionGaps, 1);
   }
 
   for (let i = 1; i < walEntries.length; i++) {
