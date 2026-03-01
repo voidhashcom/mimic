@@ -50,6 +50,7 @@
     "vitest": "^3.2.4"
   },
   "peerDependencies": {
-    "@voidhash/mimic": "workspace:*"
+    "@voidhash/mimic": "workspace:*",
+    "@effect/platform-bun": "catalog:"
   }
 }
