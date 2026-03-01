@@ -40,6 +40,28 @@ importers:
         specifier: ^5.6.4
         version: 5.6.4(effect@3.19.13)(typescript@5.8.3)
 
+  apps/host:
+    dependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21(effect@4.0.0-beta.21)
+      '@voidhash/mimic':
+        specifier: workspace:*
+        version: link:../../packages/mimic
+      '@voidhash/mimic-effect':
+        specifier: workspace:*
+        version: link:../../packages/mimic-effect
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21
+    devDependencies:
+      '@voidhash/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      typescript:
+        specifier: ^5
+        version: 5.8.3
+
   examples/mimic-example-client:
     dependencies:
       '@dnd-kit/core':
