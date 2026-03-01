@@ -157,6 +157,8 @@ export interface Primitive<TState, TProxy, TRequired extends boolean = false, TH
   export interface Validator<T> {
     readonly validate: (value: T) => boolean;
     readonly message: string;
+    readonly kind?: string;
+    readonly params?: unknown;
   }
   
 

@@ -173,18 +173,28 @@ export class ArrayPrimitive<TElement extends AnyPrimitive, TRequired extends boo
 
   /** Minimum array length */
   minLength(length: number): ArrayPrimitive<TElement, TRequired, THasDefault> {
-    return this.refine(
-      (v) => v.length >= length,
-      `Array must have at least ${length} elements`
-    );
+    return new ArrayPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v.length >= length,
+        message: `Array must have at least ${length} elements`,
+        kind: "minLength",
+        params: { value: length },
+      }],
+    });
   }
 
   /** Maximum array length */
   maxLength(length: number): ArrayPrimitive<TElement, TRequired, THasDefault> {
-    return this.refine(
-      (v) => v.length <= length,
-      `Array must have at most ${length} elements`
-    );
+    return new ArrayPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v.length <= length,
+        message: `Array must have at most ${length} elements`,
+        kind: "maxLength",
+        params: { value: length },
+      }],
+    });
   }
 
   readonly _internal: PrimitiveInternal<ArrayState<TElement>, ArrayProxy<TElement>> = {

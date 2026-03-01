@@ -79,42 +79,64 @@ export class NumberPrimitive<TRequired extends boolean = false, THasDefault exte
 
   /** Minimum value (inclusive) */
   min(value: number): NumberPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => v >= value,
-      `Number must be at least ${value}`
-    );
+    return new NumberPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v >= value,
+        message: `Number must be at least ${value}`,
+        kind: "min",
+        params: { value },
+      }],
+    });
   }
 
   /** Maximum value (inclusive) */
   max(value: number): NumberPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => v <= value,
-      `Number must be at most ${value}`
-    );
+    return new NumberPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v <= value,
+        message: `Number must be at most ${value}`,
+        kind: "max",
+        params: { value },
+      }],
+    });
   }
 
   /** Must be positive (> 0) */
   positive(): NumberPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => v > 0,
-      "Number must be positive"
-    );
+    return new NumberPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v > 0,
+        message: "Number must be positive",
+        kind: "positive",
+      }],
+    });
   }
 
   /** Must be negative (< 0) */
   negative(): NumberPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => v < 0,
-      "Number must be negative"
-    );
+    return new NumberPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v < 0,
+        message: "Number must be negative",
+        kind: "negative",
+      }],
+    });
   }
 
   /** Must be an integer */
   int(): NumberPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => globalThis.Number.isInteger(v),
-      "Number must be an integer"
-    );
+    return new NumberPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => globalThis.Number.isInteger(v),
+        message: "Number must be an integer",
+        kind: "int",
+      }],
+    });
   }
 
   readonly _internal: PrimitiveInternal<number, NumberProxy<TRequired, THasDefault>> = {
