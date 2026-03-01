@@ -99,7 +99,7 @@ export const validate = <TData,>(
   presence: Presence<TData>,
   data: unknown
 ): TData => {
-  return Schema.decodeUnknownSync(presence.schema)(data);
+  return Schema.decodeUnknownSync(presence.schema as any)(data);
 };
 
 /**
@@ -115,7 +115,7 @@ export const validateSafe = <TData,>(
   data: unknown
 ): TData | undefined => {
   try {
-    return Schema.decodeUnknownSync(presence.schema)(data);
+    return Schema.decodeUnknownSync(presence.schema as any)(data);
   } catch {
     return undefined;
   }
@@ -133,7 +133,7 @@ export const isValid = <TData,>(
   data: unknown
 ): data is TData => {
   try {
-    Schema.decodeUnknownSync(presence.schema)(data);
+    Schema.decodeUnknownSync(presence.schema as any)(data);
     return true;
   } catch {
     return false;

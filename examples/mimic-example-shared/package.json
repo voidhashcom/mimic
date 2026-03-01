@@ -16,7 +16,7 @@
     "@voidhash/mimic": "workspace:*"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.26.0",
+    "@effect/vitest": "catalog:",
     "@voidhash/tsconfig": "workspace:*",
     "typescript": "5.8.3",
     "vitest": "^3.2.4",

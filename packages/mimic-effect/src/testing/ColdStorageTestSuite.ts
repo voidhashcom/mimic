@@ -565,11 +565,11 @@ export const runAll = (): Effect.Effect<
     }> = [];
 
     for (const test of tests) {
-      const result = yield* Effect.either(test.run);
-      if (result._tag === "Right") {
+      const result = yield* Effect.result(test.run);
+      if (result._tag === "Success") {
         passed.push(test);
       } else {
-        failed.push({ test, error: result.left });
+        failed.push({ test, error: result.failure });
       }
     }
 

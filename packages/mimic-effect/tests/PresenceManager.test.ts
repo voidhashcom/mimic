@@ -104,7 +104,7 @@ describe("PresenceManager", () => {
             const eventStream = yield* pm.subscribe("doc-1");
 
             // Collect events in background
-            const eventsFiber = yield* Effect.fork(
+            const eventsFiber = yield* Effect.forkChild(
               Stream.runCollect(Stream.take(eventStream, 1))
             );
 
@@ -186,7 +186,7 @@ describe("PresenceManager", () => {
             const eventStream = yield* pm.subscribe("doc-1");
 
             // Collect events in background
-            const eventsFiber = yield* Effect.fork(
+            const eventsFiber = yield* Effect.forkChild(
               Stream.runCollect(Stream.take(eventStream, 1))
             );
 
@@ -221,7 +221,7 @@ describe("PresenceManager", () => {
             const eventStream = yield* pm.subscribe("doc-1");
 
             // Collect events in background with a timeout
-            const eventsFiber = yield* Effect.fork(
+            const eventsFiber = yield* Effect.forkChild(
               Stream.runCollect(
                 Stream.take(eventStream, 1).pipe(Stream.timeout("50 millis"))
               )
@@ -254,7 +254,7 @@ describe("PresenceManager", () => {
 
             const eventStream = yield* pm.subscribe("doc-1");
 
-            const eventsFiber = yield* Effect.fork(
+            const eventsFiber = yield* Effect.forkChild(
               Stream.runCollect(Stream.take(eventStream, 2))
             );
 
@@ -285,7 +285,7 @@ describe("PresenceManager", () => {
 
             const eventStream = yield* pm.subscribe("doc-1");
 
-            const eventsFiber = yield* Effect.fork(
+            const eventsFiber = yield* Effect.forkChild(
               Stream.runCollect(Stream.take(eventStream, 3))
             );
 
@@ -342,7 +342,7 @@ describe("PresenceManager", () => {
             // Subscribe to doc-1 only
             const eventStream = yield* pm.subscribe("doc-1");
 
-            const eventsFiber = yield* Effect.fork(
+            const eventsFiber = yield* Effect.forkChild(
               Stream.runCollect(
                 Stream.take(eventStream, 1).pipe(Stream.timeout("100 millis"))
               )

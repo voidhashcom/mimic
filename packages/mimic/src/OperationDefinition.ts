@@ -2,14 +2,14 @@ import { Schema } from "effect";
 
 type Mutable<T> = T extends ReadonlyArray<infer U> ? Array<U> : { -readonly [K in keyof T]: T[K] };
 
-export interface OperationDefinition<TKind, TPayload extends Schema.Schema.Any, TTarget extends Schema.Schema.Any> {
+export interface OperationDefinition<TKind, TPayload extends Schema.Top, TTarget extends Schema.Top> {
     readonly kind: TKind
     readonly payload: TPayload
     readonly target: TTarget
     readonly deduplicable?: boolean
 }
 
-export const make = <TKind, TPayload extends Schema.Schema.Any, TTarget extends Schema.Schema.Any>(options: {
+export const make = <TKind, TPayload extends Schema.Top, TTarget extends Schema.Top>(options: {
     readonly kind: TKind
     readonly payload: TPayload
     readonly target: TTarget

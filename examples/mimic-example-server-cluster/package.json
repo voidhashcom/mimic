@@ -16,17 +16,14 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@effect/cluster": "catalog:",
-    "@effect/platform": "catalog:",
     "@effect/platform-bun": "catalog:",
-    "@effect/rpc": "catalog:",
     "@voidhash/mimic": "workspace:*",
     "@voidhash/mimic-effect": "workspace:*",
     "@voidhash/mimic-example-shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.26.0",
+    "@effect/vitest": "catalog:",
     "@voidhash/tsconfig": "workspace:*",
     "typescript": "5.8.3",
     "vitest": "^3.2.4",

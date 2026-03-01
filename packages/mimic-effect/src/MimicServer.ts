@@ -12,12 +12,8 @@ import {
   Metric,
   Stream,
 } from "effect";
-import {
-  HttpLayerRouter,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "@effect/platform";
-import type * as Socket from "@effect/platform/Socket";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import type * as Socket from "effect/unstable/socket";
 import { Presence } from "@voidhash/mimic";
 import type { MimicServerRouteConfig, ResolvedRouteConfig } from "./Types";
 import * as Protocol from "./Protocol";
@@ -43,10 +39,10 @@ const resolveRouteConfig = (
 ): ResolvedRouteConfig => ({
   path: config?.path ?? DEFAULT_PATH,
   heartbeatInterval: config?.heartbeatInterval
-    ? Duration.decode(config.heartbeatInterval)
+    ? Duration.fromInputUnsafe(config.heartbeatInterval)
     : DEFAULT_HEARTBEAT_INTERVAL,
   heartbeatTimeout: config?.heartbeatTimeout
-    ? Duration.decode(config.heartbeatTimeout)
+    ? Duration.fromInputUnsafe(config.heartbeatTimeout)
     : DEFAULT_HEARTBEAT_TIMEOUT,
 });
 
@@ -94,7 +90,7 @@ interface ConnectionState {
  */
 const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
   function* (
-    socket: Socket.Socket,
+    socket: Socket.Socket.Socket,
     documentId: string,
     engine: MimicServerEngine,
     authService: MimicAuthService,
@@ -104,8 +100,8 @@ const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
     const connectionStartTime = Date.now();
 
     // Track connection metrics
-    yield* Metric.increment(Metrics.connectionsTotal);
-    yield* Metric.incrementBy(Metrics.connectionsActive, 1);
+    yield* Metric.update(Metrics.connectionsTotal, 1);
+    yield* Metric.update(Metrics.connectionsActive, 1);
 
     // Track connection state (mutable for simplicity)
     const state: ConnectionState = {
@@ -146,18 +142,18 @@ const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
 
     // Handle authentication
     const handleAuth = Effect.fn("auth.handle")(function* (token: string) {
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         authService.authenticate(token, documentId)
       );
 
-      if (result._tag === "Right") {
+      if (result._tag === "Success") {
         state.authenticated = true;
-        state.authContext = result.right;
+        state.authContext = result.success;
 
         yield* sendMessage(
           Protocol.authResultSuccess(
-            result.right.userId,
-            result.right.permission
+            result.success.userId,
+            result.success.permission
           )
         );
 
@@ -167,10 +163,10 @@ const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
         // Send presence snapshot after successful auth
         yield* sendPresenceSnapshot();
       } else {
-        yield* Metric.increment(Metrics.connectionsErrors);
+        yield* Metric.update(Metrics.connectionsErrors, 1);
         yield* sendMessage(
           Protocol.authResultFailure(
-            result.left.reason ?? "Authentication failed"
+            result.failure.reason ?? "Authentication failed"
           )
         );
       }
@@ -295,7 +291,7 @@ const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
     );
 
     // Subscribe to document broadcasts
-    const subscribeFiber = yield* Effect.fork(
+    const subscribeFiber = yield* Effect.forkChild(
       Effect.fn("subscriptions.document.start")(function* () {
         // Wait until authenticated before subscribing
         while (!state.authenticated) {
@@ -313,7 +309,7 @@ const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
     );
 
     // Subscribe to presence events (if presence is enabled)
-    const presenceFiber = yield* Effect.fork(
+    const presenceFiber = yield* Effect.forkChild(
       Effect.fn("subscriptions.presence.start")(function* () {
         if (!engine.config.presence) return;
 
@@ -359,7 +355,7 @@ const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
         }
 
         // Update connection metrics
-        yield* Metric.incrementBy(Metrics.connectionsActive, -1);
+        yield* Metric.update(Metrics.connectionsActive, -1);
         yield* Metric.update(Metrics.connectionsDuration, duration);
 
         yield* Effect.logDebug("WebSocket connection closed", {
@@ -371,12 +367,12 @@ const handleWebSocketConnection = Effect.fn("websocket.connection.handle")(
     );
 
     // Process incoming messages
-    yield* socket.runRaw((data) =>
+    yield* socket.runRaw((data: string | Uint8Array) =>
       Effect.fn("message.process")(function* () {
         const message = yield* Protocol.parseClientMessage(data);
         yield* handleMessage(message);
       })().pipe(
-        Effect.catchAll((error) =>
+        Effect["catch"]((error) =>
           Effect.logError("Message handling error", error)
         )
       )
@@ -433,11 +429,11 @@ export const layerHttpLayerRouter = (
 
   // Build the route path pattern: {path}/doc/:documentId
   const routePath =
-    `${routeConfig.path}/doc/:documentId` as HttpLayerRouter.PathInput;
+    `${routeConfig.path}/doc/:documentId` as HttpRouter.PathInput;
 
-  return Layer.scopedDiscard(
+  return Layer.effectDiscard(
     Effect.gen(function* () {
-      const router = yield* HttpLayerRouter.HttpRouter;
+      const router = yield* HttpRouter.HttpRouter;
       // Capture engine and auth service at layer creation time
       const engine = yield* MimicServerEngineTag;
       const authService = yield* MimicAuthServiceTag;
@@ -447,16 +443,16 @@ export const layerHttpLayerRouter = (
       const handler = Effect.fn("websocket.route.handler")(
         function* (request: HttpServerRequest.HttpServerRequest) {
           // Extract document ID from path
-          const documentIdResult = yield* Effect.either(
+          const documentIdResult = yield* Effect.result(
             extractDocumentId(request.url)
           );
-          if (documentIdResult._tag === "Left") {
+          if (documentIdResult._tag === "Failure") {
             return HttpServerResponse.text(
               `Missing document ID in path: ${request.url}`,
               { status: 400 }
             );
           }
-          const documentId = documentIdResult.right;
+          const documentId = documentIdResult.success;
 
           // Upgrade to WebSocket
           const socket = yield* request.upgrade;
@@ -470,7 +466,7 @@ export const layerHttpLayerRouter = (
             routeConfig
           ).pipe(
             Effect.scoped,
-            Effect.catchAll((error) =>
+            Effect["catch"]((error) =>
               Effect.logError("WebSocket connection error", error)
             )
           );

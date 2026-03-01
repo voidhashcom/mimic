@@ -229,7 +229,7 @@ function buildUnionSetSchema(unionPrimitive: UnionPrimitive<UnionVariants, any, 
     return variantSchemas[0]!;
   }
   
-  return Schema.Union(...variantSchemas as [Schema.Schema<any>, Schema.Schema<any>, ...Schema.Schema<any>[]]);
+  return Schema.Union(variantSchemas as any);
 }
 
 /**
@@ -252,7 +252,7 @@ function buildEitherSchema(eitherPrimitive: EitherPrimitive<readonly ScalarPrimi
     return variantSchemas[0]!;
   }
   
-  return Schema.Union(...variantSchemas as [Schema.Schema<any>, Schema.Schema<any>, ...Schema.Schema<any>[]]);
+  return Schema.Union(variantSchemas as any);
 }
 
 /**
@@ -276,7 +276,7 @@ function buildUnionUpdateSchema(unionPrimitive: UnionPrimitive<UnionVariants, an
     return variantSchemas[0]!;
   }
   
-  return Schema.Union(...variantSchemas as [Schema.Schema<any>, Schema.Schema<any>, ...Schema.Schema<any>[]]);
+  return Schema.Union(variantSchemas as any);
 }
 
 /**

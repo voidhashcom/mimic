@@ -4,7 +4,7 @@ import * as OperationDefinition from "./OperationDefinition"
 import { Schema } from "effect";
 
 
-export type Operation<TKind, TPayload extends Schema.Schema.Any, TDef extends OperationDefinition.OperationDefinition<TKind, TPayload, any>> = {
+export type Operation<TKind, TPayload extends Schema.Top, TDef extends OperationDefinition.OperationDefinition<TKind, TPayload, any>> = {
     readonly kind: TKind
     readonly path: OperationPath.OperationPath
     readonly payload: Schema.Schema.Type<TPayload>,
@@ -12,7 +12,7 @@ export type Operation<TKind, TPayload extends Schema.Schema.Any, TDef extends Op
 
 } & TDef
 
-export const fromDefinition = <TKind, TPayload extends Schema.Schema.Any, TDef extends OperationDefinition.OperationDefinition<TKind, TPayload, any>>(operationPath: OperationPath.OperationPath, definition: TDef, payload: Schema.Schema.Type<TPayload>): Operation<TKind, TPayload, TDef> => {
+export const fromDefinition = <TKind, TPayload extends Schema.Top, TDef extends OperationDefinition.OperationDefinition<TKind, TPayload, any>>(operationPath: OperationPath.OperationPath, definition: TDef, payload: Schema.Schema.Type<TPayload>): Operation<TKind, TPayload, TDef> => {
     return {
         kind: definition.kind,
         path: operationPath,
@@ -35,7 +35,7 @@ export interface EncodedOperation {
  * @param operation - The operation to encode.
  * @returns The encoded representation.
  */
-export const encode = <TKind, TPayload extends Schema.Schema.Any, TDef extends OperationDefinition.OperationDefinition<TKind, TPayload, any>>(
+export const encode = <TKind, TPayload extends Schema.Top, TDef extends OperationDefinition.OperationDefinition<TKind, TPayload, any>>(
     operation: Operation<TKind, TPayload, TDef>
 ): EncodedOperation => {
     return {
@@ -52,10 +52,10 @@ export const encode = <TKind, TPayload extends Schema.Schema.Any, TDef extends O
  * @param encoded - The encoded representation.
  * @returns The decoded Operation (without definition-specific methods).
  */
-export const decode = (encoded: EncodedOperation): Operation<unknown, Schema.Schema.Any, any> => {
+export const decode = (encoded: EncodedOperation): Operation<unknown, Schema.Top, any> => {
     return {
         kind: encoded.kind,
         path: OperationPath.decode(encoded.path),
         payload: encoded.payload,
-    } as Operation<unknown, Schema.Schema.Any, any>
+    } as Operation<unknown, Schema.Top, any>
 }
