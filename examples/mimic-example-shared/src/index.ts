@@ -1,4 +1,4 @@
-import { Primitive, ProxyEnvironment, OperationPath, Presence } from "@voidhash/mimic";
+import { Primitive, ProxyEnvironment, OperationPath, Presence, SchemaJSON } from "@voidhash/mimic";
 import { Schema } from "effect";
 
 export const CardNode = Primitive.TreeNode("card", {
@@ -29,6 +29,8 @@ export const BoardNode = Primitive.TreeNode("board", {
 export const MimicExampleSchema = Primitive.Tree({
     root: BoardNode,
 })
+
+export const MimicExampleSchemaJSON = SchemaJSON.toJSON(MimicExampleSchema);
 
 export const PresenceSchema = Presence.make({
     schema: Schema.Struct({
