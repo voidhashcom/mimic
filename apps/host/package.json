@@ -13,8 +13,8 @@
 	},
 	"dependencies": {
 		"@effect/platform-bun": "catalog:",
+		"@effect/sql-mysql2": "catalog:",
 		"@voidhash/mimic": "workspace:*",
-		"@voidhash/mimic-effect": "workspace:*",
 		"effect": "catalog:"
 	},
 	"devDependencies": {
