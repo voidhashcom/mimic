@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useState, useMemo } from 'react'
+import { useContext, useState, useMemo } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -19,7 +19,7 @@ import { AddColumnForm } from './AddColumnForm'
 import { EditCardModal } from './EditCardModal'
 import { useKanban } from '../../context/KanbanContext'
 import type { Card as CardType, Column as ColumnType } from '../../types/kanban'
-import { useTodoStore } from '../../lib/store'
+import { useTodoStore, TodoStoreContext } from '../../lib/store'
 import { useUndoRedo, useUndoRedoKeyboard } from '@voidhash/mimic-react/zustand-commander'
 
 export function KanbanBoard() {
@@ -28,12 +28,13 @@ export function KanbanBoard() {
   const [activeType, setActiveType] = useState<'card' | 'column' | null>(null)
   const [editingCard, setEditingCard] = useState<{ card: CardType; columnId: string } | null>(null)
   const { mimic } = useTodoStore()
-  
+  const storeApi = useContext(TodoStoreContext)!
+
   // Undo/Redo functionality
-  const { canUndo, canRedo, undo, redo, undoCount, redoCount } = useUndoRedo(useTodoStore)
-  
+  const { canUndo, canRedo, undo, redo, undoCount, redoCount } = useUndoRedo(storeApi)
+
   // Enable keyboard shortcuts (Ctrl/Cmd+Z for undo, Ctrl/Cmd+Shift+Z for redo)
-  useUndoRedoKeyboard(useTodoStore)
+  useUndoRedoKeyboard(storeApi)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -213,7 +214,7 @@ export function KanbanBoard() {
               Redo ↷
             </button>
           </div>
-          
+
           {/* Connection status */}
           <div className='flex flex-row items-center gap-2'>
             <div className={`px-2 py-1 text-xs rounded ${mimic.isConnected ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}`}>
@@ -223,12 +224,12 @@ export function KanbanBoard() {
               {mimic.isReady ? "Ready" : "Loading..."}
             </div>
           </div>
-          
+
           {/* Presence indicators */}
           <div className='flex flex-row items-center -space-x-2'>
             {Array.from(mimic.presence?.all.entries() ?? []).map(([id, entry]) => (
-              <div 
-                key={id} 
+              <div
+                key={id}
                 className='w-8 h-8 rounded-full bg-blue-500 dark:bg-blue-600 flex items-center justify-center text-white text-sm font-medium border-2 border-white dark:border-gray-900'
                 title={entry.data.name ?? `User ${id}`}
               >

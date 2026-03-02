@@ -79,9 +79,6 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
-      '@effect/platform-bun':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.21(effect@4.0.0-beta.21)
       '@tailwindcss/postcss':
         specifier: ^4.1.15
         version: 4.1.18
@@ -161,49 +158,12 @@ importers:
       '@effect/platform-bun':
         specifier: 'catalog:'
         version: 4.0.0-beta.21(effect@4.0.0-beta.21)
-      '@voidhash/mimic':
-        specifier: workspace:*
-        version: link:../../packages/mimic
-      '@voidhash/mimic-effect':
-        specifier: workspace:*
-        version: link:../../packages/mimic-effect
       '@voidhash/mimic-example-shared':
         specifier: workspace:*
         version: link:../mimic-example-shared
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.21
-    devDependencies:
-      '@effect/vitest':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.21(effect@4.0.0-beta.21)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
-      '@voidhash/tsconfig':
+      '@voidhash/mimic-sdk':
         specifier: workspace:*
-        version: link:../../packages/tsconfig
-      typescript:
-        specifier: 5.8.3
-        version: 5.8.3
-      vite-tsconfig-paths:
-        specifier: ^5.1.4
-        version: 5.1.4(typescript@5.8.3)(vite@7.3.0(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
-
-  examples/mimic-example-server-cluster:
-    dependencies:
-      '@effect/platform-bun':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.21(effect@4.0.0-beta.21)
-      '@voidhash/mimic':
-        specifier: workspace:*
-        version: link:../../packages/mimic
-      '@voidhash/mimic-effect':
-        specifier: workspace:*
-        version: link:../../packages/mimic-effect
-      '@voidhash/mimic-example-shared':
-        specifier: workspace:*
-        version: link:../mimic-example-shared
+        version: link:../../packages/mimic-sdk
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.21

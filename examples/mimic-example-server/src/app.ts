@@ -1,114 +1,108 @@
-import { Console, Effect, Layer, ServiceMap } from "effect";
-import {
-  MimicServerEngine,
-  MimicServerEngineTag,
-  MimicServer,
-  MimicAuthService,
-  ColdStorage,
-  HotStorage,
-} from "@voidhash/mimic-effect";
-import {
-  MimicExampleSchema,
-  PresenceSchema,
-} from "@voidhash/mimic-example-shared";
-import { HttpRouter } from "effect/unstable/http";
+import { Effect, Layer } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { MimicSDK, MimicClientLayer } from "@voidhash/mimic-sdk/effect";
+import { MimicExampleSchema } from "@voidhash/mimic-example-shared";
 
-// Service used by initial function
-class SomeTestService extends ServiceMap.Service<SomeTestService, {
-  readonly hello: (name: string) => Effect.Effect<string>;
-}>()(
-  "app/SomeTestService",
-  {
-    make: Effect.gen(function* () {
-      const hello = (name: string) =>
-        Effect.gen(function* () {
-          yield* Console.log(`Hello ${name}!`);
-          return name;
-        });
-      return { hello } as const;
-    }),
-  }
-) {
-  static readonly layer = Layer.effect(this, this.make);
-}
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
 
-// Custom auth layer - v2 API
-// Allows all tokens with write permission
-const CustomAuthLayer = MimicAuthService.make(
-  Effect.gen(function* () {
-    return {
-      authenticate: (token: string, _documentId: string) =>
-        Effect.succeed({
-          userId: token || "anonymous",
-          permission: "write" as const,
-        }),
-    };
-  })
-);
+const HOST_URL = process.env.HOST_URL ?? "http://localhost:5001";
+const HOST_USERNAME = process.env.HOST_USERNAME ?? "root";
+const HOST_PASSWORD = process.env.HOST_PASSWORD ?? "root";
 
-// Storage layers
-const StorageLayers = Layer.mergeAll(
-  ColdStorage.InMemory.make(),
-  HotStorage.InMemory.make()
-);
+const DATABASE_NAME = "example";
+const COLLECTION_NAME = "todos";
+const DOCUMENT_ID = "kanban-board";
 
-// Create Engine layer with service access
-// We use Layer.unwrapEffect to create a layer that accesses services at creation time
-const EngineLive: Layer.Layer<MimicServerEngineTag> = Layer.unwrap(
-  Effect.gen(function* () {
-    // Access SomeTestService at engine creation time
-    const someRandomService = yield* SomeTestService;
-
-    // Return the engine layer with the service captured in closure
-    return MimicServerEngine.make({
-      schema: MimicExampleSchema,
-      presence: PresenceSchema,
-      initial: (ctx) =>
-        Effect.gen(function* () {
-          console.log(
-            "Initial function called with documentId:",
-            ctx.documentId
-          );
-          // Use the captured service reference
-          const name = yield* someRandomService.hello(ctx.documentId);
-          return {
-            type: "board" as const,
-            name: name,
-            children: [
-              { type: "column" as const, name: "Todo", children: [] },
-              { type: "column" as const, name: "In Progress", children: [] },
-              { type: "column" as const, name: "Done", children: [] },
-            ],
-          };
-        }),
-    });
-  })
-).pipe(
-  Layer.provide(SomeTestService.layer),
-  Layer.provide(StorageLayers),
-  Layer.provide(CustomAuthLayer)
-);
-
-// Create the WebSocket route
-const MimicRoute = MimicServer.layerHttpLayerRouter({
-  path: "/mimic/todo",
+const SdkLayer = MimicClientLayer({
+  url: HOST_URL,
+  username: HOST_USERNAME,
+  password: HOST_PASSWORD,
 });
 
-// Wire everything together
-// The route layer now captures engine and auth at layer creation time
-const MimicLive = MimicRoute.pipe(
-  Layer.provide(EngineLive),
-  Layer.provide(CustomAuthLayer)
+// ---------------------------------------------------------------------------
+// Provisioning — ensures db, collection, and document exist
+// ---------------------------------------------------------------------------
+
+const provision = Effect.gen(function* () {
+  // Ensure database exists
+  const databases = yield* MimicSDK.listDatabases();
+  const existingDb = databases.find((d) => d.name === DATABASE_NAME);
+  const dbHandle = existingDb
+    ? MimicSDK.database(existingDb.id, existingDb.name, existingDb.description)
+    : yield* MimicSDK.createDatabase({ name: DATABASE_NAME });
+
+  // Ensure collection exists
+  const collections = yield* dbHandle.listCollections();
+  const existingCol = collections.find((c) => c.name === COLLECTION_NAME);
+  const colHandle = existingCol
+    ? dbHandle.collection(existingCol.id, MimicExampleSchema)
+    : yield* dbHandle.createCollection(COLLECTION_NAME, MimicExampleSchema);
+
+  // Ensure document exists — create with default board if missing
+  yield* colHandle.get(DOCUMENT_ID).pipe(
+    Effect.catch(() =>
+      colHandle.create(
+        {
+          type: "board" as const,
+          name: "My Board",
+          children: [
+            { type: "column" as const, name: "Todo", children: [] },
+            { type: "column" as const, name: "In Progress", children: [] },
+            { type: "column" as const, name: "Done", children: [] },
+          ],
+        },
+        { id: DOCUMENT_ID },
+      ),
+    ),
+  );
+
+  yield* Effect.log(
+    `Provisioned: db=${dbHandle.id} col=${colHandle.id} doc=${DOCUMENT_ID}`,
+  );
+
+  return { dbHandle, colHandle } as const;
+});
+
+// ---------------------------------------------------------------------------
+// HTTP routes
+// ---------------------------------------------------------------------------
+
+const TokenRoute = Layer.effectDiscard(
+  Effect.gen(function* () {
+    // Provision on startup and cache the handles
+    const { dbHandle, colHandle } = yield* provision;
+
+    const router = yield* HttpRouter.HttpRouter;
+    yield* router.add(
+      "GET",
+      "/api/token",
+      Effect.gen(function* () {
+        const { token } = yield* colHandle.createDocumentToken(
+          DOCUMENT_ID,
+          "write",
+        );
+
+        return yield* HttpServerResponse.json({
+          token,
+          databaseId: dbHandle.id,
+          collectionId: colHandle.id,
+          documentId: DOCUMENT_ID,
+        });
+      }).pipe(Effect.provide(SdkLayer)),
+    );
+  }),
 );
 
-// Compose routes with CORS
-const AllRoutes = Layer.mergeAll(MimicLive).pipe(
+const AllRoutes = Layer.mergeAll(TokenRoute).pipe(
+  Layer.provide(SdkLayer),
   Layer.provide(
     HttpRouter.cors({
       allowedOrigins: ["http://localhost:3000"],
       credentials: true,
-    })
-  )
+    }),
+  ),
 );
 
 export const AppLive = HttpRouter.serve(AllRoutes);
