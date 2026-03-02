@@ -17,9 +17,8 @@
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
-    "@voidhash/mimic": "workspace:*",
-    "@voidhash/mimic-effect": "workspace:*",
     "@voidhash/mimic-example-shared": "workspace:*",
+    "@voidhash/mimic-sdk": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

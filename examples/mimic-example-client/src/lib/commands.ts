@@ -4,7 +4,7 @@
  * This file defines all the commands for the Kanban board with undo/redo support.
  */
 
-import { createCommander } from "@voidhash/mimic-react/zustand-commander";
+import { createCommander, type CommanderSlice } from "@voidhash/mimic-react/zustand-commander";
 import { CardNode, ColumnNode } from "@voidhash/mimic-example-shared";
 import type { MimicSlice } from "@voidhash/mimic-react/zustand";
 import type { MimicExampleSchema, PresenceSchema } from "@voidhash/mimic-example-shared";
@@ -33,9 +33,8 @@ export type KanbanStoreState = MimicSlice<
   typeof MimicExampleSchema,
   typeof PresenceSchema
 > & {
-  // Local browser state
   selectedCardId: string | null;
-};
+} & CommanderSlice;
 
 // =============================================================================
 // Commander
