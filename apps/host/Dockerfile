@@ -1,25 +1,20 @@
-FROM oven/bun:1 AS base
+FROM oven/bun:1 AS pruner
+RUN bun install -g turbo@^2.7.1
+WORKDIR /app
+COPY . .
+RUN turbo prune @voidhash/mimic-host --docker
+
+FROM oven/bun:1 AS deps
 RUN bun install -g pnpm@10.19.0
 WORKDIR /app
-
-FROM base AS deps
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
-COPY apps/host/package.json ./apps/host/
-COPY packages/mimic/package.json ./packages/mimic/
-COPY packages/mimic-protocol/package.json ./packages/mimic-protocol/
-COPY packages/tsconfig/package.json ./packages/tsconfig/
+COPY --from=pruner /app/out/json/ .
 RUN pnpm install --frozen-lockfile
 
-FROM base AS build
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/host/node_modules ./apps/host/node_modules
-COPY --from=deps /app/packages ./packages
-COPY pnpm-workspace.yaml package.json turbo.json tsconfig.json ./
-COPY packages/ ./packages/
-COPY apps/host/ ./apps/host/
+FROM deps AS build
+COPY --from=pruner /app/out/full/ .
 RUN cd apps/host && bun run build
 
-FROM base AS release
+FROM oven/bun:1 AS release
 WORKDIR /app
 COPY --from=build /app/apps/host/dist ./dist
 COPY --from=build /app/apps/host/package.json ./
