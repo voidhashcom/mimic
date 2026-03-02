@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0-beta.16",
+  "version": "1.0.0-beta.17",
   "name": "mimic-mono",
   "module": "index.ts",
   "type": "module",
@@ -25,13 +25,14 @@
   },
   "workspaces": {
     "packages": [
+      "apps/*",
       "examples/*",
       "packages/*"
     ],
     "catalog": {
-      "effect": "^3.19.12",
-      "@effect/platform": "^0.93.8",
-      "@effect/platform-bun": "^0.86.0"
+      "effect": "4.0.0-beta.21",
+      "@effect/platform-bun": "4.0.0-beta.21",
+      "@effect/vitest": "4.0.0-beta.21"
     }
   }
 }

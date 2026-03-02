@@ -1,0 +1,29 @@
+import { Config, Layer, Redacted } from "effect";
+import { MysqlClient, MysqlMigrator } from "@effect/sql-mysql2";
+import migration0001 from "./migrations/0001_initial";
+import migration0002 from "./migrations/0002_schema_versions";
+import migration0003 from "./migrations/0003_auth_refactor";
+
+const MysqlClientLive = MysqlClient.layerConfig(
+  Config.all({
+    host: Config.string("DATABASE_HOST").pipe(Config.withDefault("localhost")),
+    port: Config.number("DATABASE_PORT").pipe(Config.withDefault(3306)),
+    database: Config.string("DATABASE_NAME").pipe(Config.withDefault("voidsync")),
+    username: Config.string("DATABASE_USERNAME").pipe(Config.withDefault("root")),
+    password: Config.redacted("DATABASE_PASSWORD").pipe(
+      Config.withDefault(Redacted.make("root_password")),
+    ),
+  }),
+);
+
+const MysqlMigratorLive = MysqlMigrator.layer({
+  loader: MysqlMigrator.fromRecord({
+    "0001_initial": migration0001,
+    "0002_schema_versions": migration0002,
+    "0003_auth_refactor": migration0003,
+  }),
+});
+
+export const MysqlLive = MysqlMigratorLive.pipe(
+  Layer.provideMerge(MysqlClientLive),
+);

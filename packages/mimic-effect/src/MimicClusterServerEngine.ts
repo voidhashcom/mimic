@@ -7,7 +7,6 @@
  * This is an alternative to MimicServerEngine for distributed deployments.
  */
 import {
-  Context,
   Duration,
   Effect,
   HashMap,
@@ -17,10 +16,11 @@ import {
   Ref,
   Schedule,
   Schema,
+  ServiceMap,
   Stream,
 } from "effect";
-import { Entity, Sharding } from "@effect/cluster";
-import { Rpc } from "@effect/rpc";
+import { Entity, Sharding } from "effect/unstable/cluster";
+import { Rpc } from "effect/unstable/rpc";
 import { type Primitive, type Transaction } from "@voidhash/mimic";
 import type {
   MimicClusterServerEngineConfig,
@@ -59,13 +59,13 @@ const DEFAULT_SHARD_GROUP = "mimic-documents";
  */
 const EncodedTransactionSchema = Schema.Struct({
   id: Schema.String,
-  ops: Schema.Array(Schema.Unknown),
+  ops: Schema.Array(Schema.Any),
 });
 
 /**
  * Schema for submit result
  */
-const SubmitResultSchema = Schema.Union(
+const SubmitResultSchema = Schema.Union([
   Schema.Struct({
     success: Schema.Literal(true),
     version: Schema.Number,
@@ -73,14 +73,14 @@ const SubmitResultSchema = Schema.Union(
   Schema.Struct({
     success: Schema.Literal(false),
     reason: Schema.String,
-  })
-);
+  }),
+]);
 
 /**
  * Schema for snapshot response
  */
 const SnapshotResponseSchema = Schema.Struct({
-  state: Schema.Unknown,
+  state: Schema.Any,
   version: Schema.Number,
 });
 
@@ -88,7 +88,7 @@ const SnapshotResponseSchema = Schema.Struct({
  * Schema for presence entry
  */
 const PresenceEntrySchema = Schema.Struct({
-  data: Schema.Unknown,
+  data: Schema.Any,
   userId: Schema.optional(Schema.String),
 });
 
@@ -96,29 +96,29 @@ const PresenceEntrySchema = Schema.Struct({
  * Schema for presence snapshot response
  */
 const PresenceSnapshotResponseSchema = Schema.Struct({
-  presences: Schema.Record({ key: Schema.String, value: PresenceEntrySchema }),
+  presences: Schema.Record(Schema.String, PresenceEntrySchema),
 });
 
 /**
  * Schema for presence event
  */
-const PresenceEventSchema = Schema.Union(
+const PresenceEventSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("presence_update"),
     id: Schema.String,
-    data: Schema.Unknown,
+    data: Schema.Any,
     userId: Schema.optional(Schema.String),
   }),
   Schema.Struct({
     type: Schema.Literal("presence_remove"),
     id: Schema.String,
-  })
-);
+  }),
+]);
 
 /**
  * Schema for server message (for broadcasts)
  */
-const ServerMessageSchema = Schema.Unknown;
+const ServerMessageSchema = Schema.Any;
 
 // =============================================================================
 // Mimic Document Entity Definition
@@ -142,7 +142,7 @@ const MimicDocumentEntity = Entity.make("MimicDocument", [
 
   // Get tree-like snapshot for rendering
   Rpc.make("GetTreeSnapshot", {
-    success: Schema.Unknown,
+    success: Schema.Any,
   }),
 
   // Touch document to prevent idle GC
@@ -191,9 +191,9 @@ interface EntityState<TSchema extends Primitive.AnyPrimitive> {
 /**
  * Context tag for cluster engine configuration
  */
-class MimicClusterConfigTag extends Context.Tag(
+class MimicClusterConfigTag extends ServiceMap.Service<MimicClusterConfigTag, ResolvedClusterConfig<Primitive.AnyPrimitive>>()(
   "@voidhash/mimic-effect/MimicClusterConfig"
-)<MimicClusterConfigTag, ResolvedClusterConfig<Primitive.AnyPrimitive>>() {}
+) {}
 
 // =============================================================================
 // Resolve Configuration
@@ -206,18 +206,18 @@ const resolveClusterConfig = <TSchema extends Primitive.AnyPrimitive>(
   initial: config.initial,
   presence: config.presence,
   maxIdleTime: config.maxIdleTime
-    ? Duration.decode(config.maxIdleTime)
+    ? Duration.fromInputUnsafe(config.maxIdleTime)
     : DEFAULT_MAX_IDLE_TIME,
   maxTransactionHistory:
     config.maxTransactionHistory ?? DEFAULT_MAX_TRANSACTION_HISTORY,
   snapshot: {
     interval: config.snapshot?.interval
-      ? Duration.decode(config.snapshot.interval)
+      ? Duration.fromInputUnsafe(config.snapshot.interval)
       : DEFAULT_SNAPSHOT_INTERVAL,
     transactionThreshold:
       config.snapshot?.transactionThreshold ?? DEFAULT_SNAPSHOT_THRESHOLD,
     idleTimeout: config.snapshot?.idleTimeout
-      ? Duration.decode(config.snapshot.idleTimeout)
+      ? Duration.fromInputUnsafe(config.snapshot.idleTimeout)
       : DEFAULT_SNAPSHOT_IDLE_TIMEOUT,
   },
   shardGroup: config.shardGroup ?? DEFAULT_SHARD_GROUP,
@@ -290,14 +290,14 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
     yield* Effect.addFinalizer(() =>
       Effect.fn("cluster.entity.finalize")(function* () {
         // Best effort save - don't fail shutdown if storage is unavailable
-        yield* Effect.catchAll(instance.saveSnapshot(), (e) =>
+        yield* Effect["catch"](instance.saveSnapshot(), (e) =>
           Effect.logError("Failed to save snapshot during entity finalization", {
             documentId,
             error: e,
           })
         );
-        yield* Metric.incrementBy(Metrics.documentsActive, -1);
-        yield* Metric.increment(Metrics.documentsEvicted);
+        yield* Metric.update(Metrics.documentsActive, -1);
+        yield* Metric.update(Metrics.documentsEvicted, 1);
         yield* Effect.logDebug("Entity finalized", { documentId });
       })()
     );
@@ -308,20 +308,20 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
       const snapshotLoop = Effect.fn("cluster.entity.snapshot.loop")(function* () {
         const needs = yield* instance.needsSnapshot();
         if (needs) {
-          yield* Effect.catchAll(instance.saveSnapshot(), (e) =>
+          yield* Effect["catch"](instance.saveSnapshot(), (e) =>
             Effect.logWarning("Periodic snapshot failed in cluster entity", {
               documentId,
               error: e,
             })
           );
-          yield* Metric.increment(Metrics.storageIdleSnapshots);
+          yield* Metric.update(Metrics.storageIdleSnapshots, 1);
         }
       });
 
       // Run every idleTimeout
       yield* snapshotLoop().pipe(
         Effect.repeat(Schedule.spaced(config.snapshot.idleTimeout)),
-        Effect.fork
+        Effect.forkChild
       );
     }
 
@@ -335,7 +335,7 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
 
         // Use DocumentInstance's submit method, catching storage errors
         return yield* instance.submit(transaction).pipe(
-          Effect.catchAll((error) =>
+          Effect["catch"]((error) =>
             Effect.succeed({
               success: false as const,
               reason: `Storage error: ${String(error)}`,
@@ -364,8 +364,8 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
           presences: HashMap.set(s.presences, connectionId, entry),
         }));
 
-        yield* Metric.increment(Metrics.presenceUpdates);
-        yield* Metric.incrementBy(Metrics.presenceActive, 1);
+        yield* Metric.update(Metrics.presenceUpdates, 1);
+        yield* Metric.update(Metrics.presenceActive, 1);
 
         const state = yield* Ref.get(stateRef);
         const event: PresenceEvent = {
@@ -392,7 +392,7 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
           presences: HashMap.remove(s.presences, connectionId),
         }));
 
-        yield* Metric.incrementBy(Metrics.presenceActive, -1);
+        yield* Metric.update(Metrics.presenceActive, -1);
 
         const event: PresenceEvent = {
           type: "presence_remove",
@@ -431,9 +431,9 @@ interface SubscriptionStore {
   ) => Effect.Effect<PubSub.PubSub<PresenceEvent>>;
 }
 
-class SubscriptionStoreTag extends Context.Tag(
+class SubscriptionStoreTag extends ServiceMap.Service<SubscriptionStoreTag, SubscriptionStore>()(
   "@voidhash/mimic-effect/SubscriptionStore"
-)<SubscriptionStoreTag, SubscriptionStore>() {}
+) {}
 
 const subscriptionStoreLayer = Layer.effect(
   SubscriptionStoreTag,
@@ -554,7 +554,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
   );
 
   // Create the engine service
-  const engineLayer = Layer.scoped(
+  const engineLayer = Layer.effect(
     MimicServerEngineTag,
     Effect.gen(function* () {
       // Get entity client maker
@@ -571,7 +571,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
             const result = yield* client.Submit({
               transaction: encodedTx as { id: string; ops: unknown[] },
             }).pipe(
-              Effect.catchAll((error) =>
+              Effect["catch"]((error) =>
                 Effect.succeed({
                   success: false as const,
                   reason: `Cluster error: ${String(error)}`,

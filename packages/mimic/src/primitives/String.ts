@@ -83,59 +83,86 @@ export class StringPrimitive<TRequired extends boolean = false, THasDefault exte
 
   /** Minimum string length */
   min(length: number): StringPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => v.length >= length,
-      `String must be at least ${length} characters`
-    );
+    return new StringPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v.length >= length,
+        message: `String must be at least ${length} characters`,
+        kind: "min",
+        params: { value: length },
+      }],
+    });
   }
 
   /** Maximum string length */
   max(length: number): StringPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => v.length <= length,
-      `String must be at most ${length} characters`
-    );
+    return new StringPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v.length <= length,
+        message: `String must be at most ${length} characters`,
+        kind: "max",
+        params: { value: length },
+      }],
+    });
   }
 
   /** Exact string length */
   length(exact: number): StringPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => v.length === exact,
-      `String must be exactly ${exact} characters`
-    );
+    return new StringPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => v.length === exact,
+        message: `String must be exactly ${exact} characters`,
+        kind: "length",
+        params: { value: exact },
+      }],
+    });
   }
 
   /** Match a regex pattern */
   regex(pattern: RegExp, message?: string): StringPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => pattern.test(v),
-      message ?? `String must match pattern ${pattern}`
-    );
+    return new StringPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => pattern.test(v),
+        message: message ?? `String must match pattern ${pattern}`,
+        kind: "regex",
+        params: { pattern: pattern.source, flags: pattern.flags },
+      }],
+    });
   }
 
   /** Validate as email format */
   email(): StringPrimitive<TRequired, THasDefault> {
-    // Simple email regex - covers most common cases
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return this.refine(
-      (v) => emailPattern.test(v),
-      "Invalid email format"
-    );
+    return new StringPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => emailPattern.test(v),
+        message: "Invalid email format",
+        kind: "email",
+      }],
+    });
   }
 
   /** Validate as URL format */
   url(): StringPrimitive<TRequired, THasDefault> {
-    return this.refine(
-      (v) => {
-        try {
-          new URL(v);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      "Invalid URL format"
-    );
+    return new StringPrimitive({
+      ...this._schema,
+      validators: [...this._schema.validators, {
+        validate: (v) => {
+          try {
+            new URL(v);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        message: "Invalid URL format",
+        kind: "url",
+      }],
+    });
   }
 
   readonly _internal: PrimitiveInternal<string, StringProxy<TRequired, THasDefault>> = {
@@ -148,12 +175,12 @@ export class StringPrimitive<TRequired extends boolean = false, THasDefault exte
         },
         set: (value: InferSetInput<TRequired, THasDefault>) => {
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, value)
           );
         },
         update: (value: InferUpdateInput<TRequired, THasDefault>) => {
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, value)
           );
         },
         toSnapshot: (): MaybeUndefined<string, TRequired, THasDefault> => {

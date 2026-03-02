@@ -3,7 +3,7 @@
  *
  * Interface and implementations for document snapshot storage.
  */
-import { Context, Effect, HashMap, Layer, Ref } from "effect";
+import { Effect, HashMap, Layer, Ref, ServiceMap } from "effect";
 import type { StoredDocument } from "./Types";
 import { ColdStorageError } from "./Errors";
 
@@ -50,10 +50,9 @@ export interface ColdStorage {
 /**
  * Context tag for ColdStorage service
  */
-export class ColdStorageTag extends Context.Tag("@voidhash/mimic-effect/ColdStorage")<
-  ColdStorageTag,
-  ColdStorage
->() {}
+export class ColdStorageTag extends ServiceMap.Service<ColdStorageTag, ColdStorage>()(
+  "@voidhash/mimic-effect/ColdStorage"
+) {}
 
 // =============================================================================
 // Factory

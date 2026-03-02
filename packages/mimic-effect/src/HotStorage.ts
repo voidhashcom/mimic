@@ -3,7 +3,7 @@
  *
  * Interface and implementations for Write-Ahead Log (WAL) storage.
  */
-import { Context, Effect, HashMap, Layer, Ref } from "effect";
+import { Effect, HashMap, Layer, Ref, ServiceMap } from "effect";
 import type { WalEntry } from "./Types";
 import { HotStorageError, WalVersionGapError } from "./Errors";
 
@@ -79,10 +79,10 @@ export interface HotStorage {
 /**
  * Context tag for HotStorage service
  */
-export class HotStorageTag extends Context.Tag("@voidhash/mimic-effect/HotStorage")<
+export class HotStorageTag extends ServiceMap.Service<
   HotStorageTag,
   HotStorage
->() {}
+>()("@voidhash/mimic-effect/HotStorage") {}
 
 // =============================================================================
 // Factory

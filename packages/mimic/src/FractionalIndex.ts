@@ -729,7 +729,7 @@ export function decrementInteger(
 export function jitterString(
   orderKey: string,
   charSet: IndexedCharacterSet
-): Effect.Effect<string, Error, Random.Random> {
+): Effect.Effect<string, Error, typeof Random.Random> {
   return Effect.gen(function* () {
     const randomValue = yield* Random.next
     const shift = yield* encodeToCharSet(
@@ -744,7 +744,7 @@ export function padAndJitterString(
   orderKey: string,
   numberOfChars: number,
   charSet: IndexedCharacterSet
-): Effect.Effect<string, Error, Random.Random> {
+): Effect.Effect<string, Error, typeof Random.Random> {
   return Effect.gen(function* () {
     const paddedKey = orderKey.padEnd(
       orderKey.length + numberOfChars,
@@ -920,7 +920,7 @@ export function generateJitteredKeyBetween(
   lower: string | null,
   upper: string | null,
   charSet: IndexedCharacterSet = base62CharSet()
-): Effect.Effect<string, Error, Random.Random> {
+): Effect.Effect<string, Error, typeof Random.Random> {
   return Effect.gen(function* () {
     const key = yield* generateKeyBetween(lower, upper, charSet)
     const paddingNeeded = yield* paddingNeededForJitter(key, upper, charSet)
@@ -940,7 +940,7 @@ export function generateNJitteredKeysBetween(
   upper: string | null,
   n: number,
   charSet: IndexedCharacterSet = base62CharSet()
-): Effect.Effect<string[], Error, Random.Random> {
+): Effect.Effect<string[], Error, typeof Random.Random> {
   return Effect.gen(function* () {
     if (n === 0) {
       return []
@@ -1007,12 +1007,12 @@ export class IndexGenerator {
    * Generate any number of keys at the start of the list (before the first key).
    * Optionally you can supply a groupId to generate keys at the start of a specific group.
    */
-  public nKeysStart(n: number, groupId?: string): Effect.Effect<string[], Error, Random.Random> {
+  public nKeysStart(n: number, groupId?: string): Effect.Effect<string[], Error, typeof Random.Random> {
     const self = this
     return Effect.gen(function* () {
-      yield* Effect.try(() => {
+      yield* Effect.try({ try: () => {
         self.validateGroupId(groupId)
-      })
+      }, catch: (e) => e instanceof Error ? e : new Error(String(e)) })
       const firstKey = self.firstOfGroup(groupId)
       return yield* self.generateNKeysBetween(null, firstKey, n, groupId)
     })
@@ -1022,7 +1022,7 @@ export class IndexGenerator {
    * Generate a single key at the start of the list (before the first key).
    * Optionally you can supply a groupId to generate a key at the start of a specific group.
    */
-  public keyStart(groupId?: string): Effect.Effect<string, Error, Random.Random> {
+  public keyStart(groupId?: string): Effect.Effect<string, Error, typeof Random.Random> {
     const self = this
     return Effect.gen(function* () {
       const keys = yield* self.nKeysStart(1, groupId)
@@ -1034,12 +1034,12 @@ export class IndexGenerator {
    * Generate any number of keys at the end of the list (after the last key).
    * Optionally you can supply a groupId to generate keys at the end of a specific group.
    */
-  public nKeysEnd(n: number, groupId?: string): Effect.Effect<string[], Error, Random.Random> {
+  public nKeysEnd(n: number, groupId?: string): Effect.Effect<string[], Error, typeof Random.Random> {
     const self = this
     return Effect.gen(function* () {
-      yield* Effect.try(() => {
+      yield* Effect.try({ try: () => {
         self.validateGroupId(groupId)
-      })
+      }, catch: (e) => e instanceof Error ? e : new Error(String(e)) })
       const lastKey = self.lastOfGroup(groupId)
       return yield* self.generateNKeysBetween(lastKey, null, n, groupId)
     })
@@ -1049,7 +1049,7 @@ export class IndexGenerator {
    * Generate a single key at the end of the list (after the last key).
    * Optionally you can supply a groupId to generate a key at the end of a specific group.
    */
-  public keyEnd(groupId?: string): Effect.Effect<string, Error, Random.Random> {
+  public keyEnd(groupId?: string): Effect.Effect<string, Error, typeof Random.Random> {
     const self = this
     return Effect.gen(function* () {
       const keys = yield* self.nKeysEnd(1, groupId)
@@ -1061,7 +1061,7 @@ export class IndexGenerator {
    * Generate any number of keys behind a specific key and in front of the next key.
    * GroupId will be inferred from the orderKey if working with groups
    */
-  public nKeysAfter(orderKey: string, n: number): Effect.Effect<string[], Error, Random.Random> {
+  public nKeysAfter(orderKey: string, n: number): Effect.Effect<string[], Error, typeof Random.Random> {
     const self = this
     return Effect.gen(function* () {
       const keyAfter = yield* self.getKeyAfter(orderKey)
@@ -1073,7 +1073,7 @@ export class IndexGenerator {
    * Generate a single key behind a specific key and in front of the next key.
    * GroupId will be inferred from the orderKey if working with groups
    */
-  public keyAfter(orderKey: string): Effect.Effect<string, Error, Random.Random> {
+  public keyAfter(orderKey: string): Effect.Effect<string, Error, typeof Random.Random> {
     const self = this
     return Effect.gen(function* () {
       const keys = yield* self.nKeysAfter(orderKey, 1)
@@ -1085,7 +1085,7 @@ export class IndexGenerator {
    * Generate any number of keys in front of a specific key and behind the previous key.
    * GroupId will be inferred from the orderKey if working with groups
    */
-  public nKeysBefore(orderKey: string, n: number): Effect.Effect<string[], Error, Random.Random> {
+  public nKeysBefore(orderKey: string, n: number): Effect.Effect<string[], Error, typeof Random.Random> {
     const self = this
     return Effect.gen(function* () {
       const keyBefore = yield* self.getKeyBefore(orderKey)
@@ -1097,7 +1097,7 @@ export class IndexGenerator {
    * Generate a single key in front of a specific key and behind the previous key.
    * GroupId will be inferred from the orderKey if working with groups
    */
-  public keyBefore(orderKey: string): Effect.Effect<string, Error, Random.Random> {
+  public keyBefore(orderKey: string): Effect.Effect<string, Error, typeof Random.Random> {
     const self = this
     return Effect.gen(function* () {
       const keys = yield* self.nKeysBefore(orderKey, 1)
@@ -1113,7 +1113,7 @@ export class IndexGenerator {
     upperKey: string | null,
     n: number,
     groupId: string | undefined
-  ): Effect.Effect<string[], Error, Random.Random> {
+  ): Effect.Effect<string[], Error, typeof Random.Random> {
     const self = this
     const lower = self.groupLessKey(lowerKey)
     const upper = self.groupLessKey(upperKey)
@@ -1128,7 +1128,7 @@ export class IndexGenerator {
       return Effect.gen(function* () {
         const keys = yield* generateNKeysBetween(lower, upper, n, self.charSet)
         return !groupId ? keys : keys.map((key) => groupId + key)
-      }).pipe(Effect.provideService(Random as any, Random.make(Math.random())))
+      }).pipe(Random.withSeed(Math.random()))
     }
   }
 

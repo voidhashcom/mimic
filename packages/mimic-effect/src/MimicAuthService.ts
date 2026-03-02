@@ -3,7 +3,7 @@
  *
  * Authentication and authorization service interface and implementations.
  */
-import { Context, Effect, Layer } from "effect";
+import { Effect, Layer, ServiceMap } from "effect";
 import type { AuthContext, Permission } from "./Types";
 import { AuthenticationError } from "./Errors";
 
@@ -43,9 +43,9 @@ export interface MimicAuthService {
 /**
  * Context tag for MimicAuthService
  */
-export class MimicAuthServiceTag extends Context.Tag(
+export class MimicAuthServiceTag extends ServiceMap.Service<MimicAuthServiceTag, MimicAuthService>()(
   "@voidhash/mimic-effect/MimicAuthService"
-)<MimicAuthServiceTag, MimicAuthService>() {}
+) {}
 
 // =============================================================================
 // Factory

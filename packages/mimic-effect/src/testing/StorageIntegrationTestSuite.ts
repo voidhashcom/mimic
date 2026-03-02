@@ -713,12 +713,12 @@ export const runAll = <R>(
     const results: Array<{ name: string; passed: boolean; error?: unknown }> = [];
 
     for (const test of tests) {
-      const result = yield* Effect.either(test.run.pipe(Effect.provide(layer)));
+      const result = yield* Effect.result(test.run.pipe(Effect.provide(layer)));
 
-      if (result._tag === "Right") {
+      if (result._tag === "Success") {
         results.push({ name: test.name, passed: true });
       } else {
-        results.push({ name: test.name, passed: false, error: result.left });
+        results.push({ name: test.name, passed: false, error: result.failure });
       }
     }
 

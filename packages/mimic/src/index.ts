@@ -14,3 +14,4 @@ export * as Presence from "./Presence";
 export * as EffectSchema from "./EffectSchema";
 export * as Types from "./types/index";
 export * as TreeHelpers from "./utils/tree-helpers";
+export * as SchemaJSON from "./SchemaJSON";

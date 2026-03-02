@@ -107,7 +107,7 @@ export type PresenceEvent = PresenceUpdateEvent | PresenceRemoveEvent;
 /**
  * Duration input type - matches Effect's DurationInput
  */
-export type DurationInput = Duration.DurationInput;
+export type DurationInput = Duration.Input;
 
 /**
  * Snapshot configuration

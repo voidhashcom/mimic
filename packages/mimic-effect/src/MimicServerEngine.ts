@@ -7,7 +7,7 @@
  * This is the engine layer - for WebSocket routes, use MimicServer.layerHttpLayerRouter().
  */
 import {
-  Context,
+  ServiceMap,
   Duration,
   Effect,
   HashMap,
@@ -152,9 +152,9 @@ export interface MimicServerEngine {
 /**
  * Context tag for MimicServerEngine
  */
-export class MimicServerEngineTag extends Context.Tag(
+export class MimicServerEngineTag extends ServiceMap.Service<MimicServerEngineTag, MimicServerEngine>()(
   "@voidhash/mimic-effect/MimicServerEngine"
-)<MimicServerEngineTag, MimicServerEngine>() {}
+) {}
 
 // =============================================================================
 // Default Configuration
@@ -176,18 +176,18 @@ const resolveConfig = <TSchema extends Primitive.AnyPrimitive>(
   initial: config.initial,
   presence: config.presence,
   maxIdleTime: config.maxIdleTime
-    ? Duration.decode(config.maxIdleTime)
+    ? Duration.fromInputUnsafe(config.maxIdleTime)
     : DEFAULT_MAX_IDLE_TIME,
   maxTransactionHistory:
     config.maxTransactionHistory ?? DEFAULT_MAX_TRANSACTION_HISTORY,
   snapshot: {
     interval: config.snapshot?.interval
-      ? Duration.decode(config.snapshot.interval)
+      ? Duration.fromInputUnsafe(config.snapshot.interval)
       : DEFAULT_SNAPSHOT_INTERVAL,
     transactionThreshold:
       config.snapshot?.transactionThreshold ?? DEFAULT_SNAPSHOT_THRESHOLD,
     idleTimeout: config.snapshot?.idleTimeout
-      ? Duration.decode(config.snapshot.idleTimeout)
+      ? Duration.fromInputUnsafe(config.snapshot.idleTimeout)
       : DEFAULT_SNAPSHOT_IDLE_TIMEOUT,
   },
 });
@@ -248,7 +248,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 > => {
   const resolvedConfig = resolveConfig(config);
 
-  return Layer.scoped(
+  return Layer.effect(
     MimicServerEngineTag,
     Effect.gen(function* () {
       const coldStorage = yield* ColdStorageTag;
@@ -311,7 +311,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
             const lastActivity = yield* Ref.get(entry.lastActivityTime);
             if (now - lastActivity >= maxIdleMs) {
               // Save final snapshot before eviction (best effort)
-              yield* Effect.catchAll(entry.instance.saveSnapshot(), (e) =>
+              yield* Effect["catch"](entry.instance.saveSnapshot(), (e) =>
                 Effect.logError("Failed to save snapshot during eviction", {
                   documentId,
                   error: e,
@@ -322,8 +322,8 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
               yield* Ref.update(store, (map) => HashMap.remove(map, documentId));
 
               // Track eviction metrics
-              yield* Metric.increment(Metrics.documentsEvicted);
-              yield* Metric.incrementBy(Metrics.documentsActive, -1);
+              yield* Metric.update(Metrics.documentsEvicted, 1);
+              yield* Metric.update(Metrics.documentsActive, -1);
 
               yield* Effect.logInfo("Document evicted due to idle timeout", {
                 documentId,
@@ -335,7 +335,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
         // Run GC every minute
         yield* gcLoop().pipe(
           Effect.repeat(Schedule.spaced("1 minute")),
-          Effect.fork
+          Effect.forkChild
         );
       });
 
@@ -376,7 +376,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
             }
 
             // Save snapshot (with error handling)
-            yield* Effect.catchAll(entry.instance.saveSnapshot(), (e) =>
+            yield* Effect["catch"](entry.instance.saveSnapshot(), (e) =>
               Effect.logWarning("Periodic snapshot save failed", {
                 documentId,
                 error: e,
@@ -384,14 +384,14 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
             );
 
             // Track metric
-            yield* Metric.increment(Metrics.storageIdleSnapshots);
+            yield* Metric.update(Metrics.storageIdleSnapshots, 1);
           }
         });
 
         // Run snapshot check every 10 seconds
         yield* snapshotLoop().pipe(
           Effect.repeat(Schedule.spaced("10 seconds")),
-          Effect.fork
+          Effect.forkChild
         );
       });
 
@@ -404,7 +404,7 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
           const current = yield* Ref.get(store);
           for (const [documentId, entry] of current) {
             // Best effort save - don't fail shutdown if storage is unavailable
-            yield* Effect.catchAll(entry.instance.saveSnapshot(), (e) =>
+            yield* Effect["catch"](entry.instance.saveSnapshot(), (e) =>
               Effect.logError("Failed to save snapshot during shutdown", {
                 documentId,
                 error: e,

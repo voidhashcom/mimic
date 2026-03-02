@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Layer, Schema } from "effect";
 import { Primitive, Presence, Document, Transaction } from "@voidhash/mimic";
-import { TestRunner } from "@effect/cluster";
+import { TestRunner } from "effect/unstable/cluster";
 import {
   MimicClusterServerEngine,
 } from "../src/MimicClusterServerEngine";

@@ -1,7 +1,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { BoardNode } from "@voidhash/mimic-example-shared";
 import type { Primitive } from "@voidhash/mimic";
-import { useTodoStore } from "../lib/store";
+import { useTodoStore, TodoStoreContext } from "../lib/store";
 import { useCommander } from "@voidhash/mimic-react/zustand-commander";
 import {
   addColumn,
@@ -36,7 +36,8 @@ const KanbanContext = createContext<KanbanContextValue | null>(null);
 
 export function KanbanProvider({ children }: { children: ReactNode }) {
   const store = useTodoStore();
-  const dispatch = useCommander(useTodoStore);
+  const storeApi = useContext(TodoStoreContext)!;
+  const dispatch = useCommander(storeApi);
 
   const handleAddColumn = (title: string) => {
     dispatch(addColumn)({ title });
@@ -67,7 +68,6 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
   };
 
   const handleDeleteCard = (cardId: string, _columnId: string) => {
-    // columnId is kept for interface compatibility but not needed by the command
     dispatch(deleteCard)({ cardId });
   };
 

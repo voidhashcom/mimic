@@ -87,12 +87,12 @@ export class LiteralPrimitive<T extends LiteralValue, TRequired extends boolean 
         },
         set: (value: InferSetInput<T, TRequired, THasDefault>) => {
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, value)
           );
         },
         update: (value: InferUpdateInput<T, TRequired, THasDefault>) => {
           env.addOperation(
-            Operation.fromDefinition(operationPath, this._opDefinitions.set, value)
+            Operation.fromDefinition(operationPath, this._opDefinitions.set as any, value)
           );
         },
         toSnapshot: (): MaybeUndefined<T, TRequired, THasDefault> => {

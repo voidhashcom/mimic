@@ -4,7 +4,6 @@
  * Internal service for managing presence state per document.
  */
 import {
-  Context,
   Effect,
   HashMap,
   Layer,
@@ -12,6 +11,7 @@ import {
   PubSub,
   Ref,
   Scope,
+  ServiceMap,
   Stream,
 } from "effect";
 import type {
@@ -72,9 +72,9 @@ export interface PresenceManager {
 /**
  * Context tag for PresenceManager service
  */
-export class PresenceManagerTag extends Context.Tag(
+export class PresenceManagerTag extends ServiceMap.Service<PresenceManagerTag, PresenceManager>()(
   "@voidhash/mimic-effect/PresenceManager"
-)<PresenceManagerTag, PresenceManager>() {}
+) {}
 
 // =============================================================================
 // Internal Types
@@ -167,8 +167,8 @@ export const layer: Layer.Layer<PresenceManagerTag> = Layer.effect(
           });
 
           // Track metrics
-          yield* Metric.increment(Metrics.presenceUpdates);
-          yield* Metric.incrementBy(Metrics.presenceActive, 1);
+          yield* Metric.update(Metrics.presenceUpdates, 1);
+          yield* Metric.update(Metrics.presenceActive, 1);
 
           // Broadcast update event
           const event: PresenceEvent = {
@@ -205,7 +205,7 @@ export const layer: Layer.Layer<PresenceManagerTag> = Layer.effect(
           });
 
           // Track metrics
-          yield* Metric.incrementBy(Metrics.presenceActive, -1);
+          yield* Metric.update(Metrics.presenceActive, -1);
 
           // Broadcast remove event
           const event: PresenceEvent = {

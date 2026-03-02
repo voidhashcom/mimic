@@ -444,7 +444,7 @@ describe("DocumentInstance", () => {
           const broadcastStream = Stream.fromPubSub(instance.pubsub);
 
           // Start collecting in background
-          const collectFiber = yield* Effect.fork(
+          const collectFiber = yield* Effect.forkChild(
             broadcastStream.pipe(Stream.take(1), Stream.runCollect)
           );
 

@@ -3,7 +3,7 @@
  *
  * Observability metrics using Effect's Metric API.
  */
-import { Metric, MetricBoundaries } from "effect";
+import { Metric } from "effect";
 
 // =============================================================================
 // Connection Metrics
@@ -24,11 +24,13 @@ export const connectionsTotal = Metric.counter("mimic.connections.total");
  */
 export const connectionsDuration = Metric.histogram(
   "mimic.connections.duration_ms",
-  MetricBoundaries.exponential({
-    start: 100,
-    factor: 2,
-    count: 15, // Up to ~3.2 million ms (~53 minutes)
-  })
+  {
+    boundaries: Metric.exponentialBoundaries({
+      start: 100,
+      factor: 2,
+      count: 15, // Up to ~3.2 million ms (~53 minutes)
+    }),
+  }
 );
 
 /**
@@ -83,11 +85,13 @@ export const transactionsRejected = Metric.counter(
  */
 export const transactionsLatency = Metric.histogram(
   "mimic.transactions.latency_ms",
-  MetricBoundaries.exponential({
-    start: 0.1,
-    factor: 2,
-    count: 15, // Up to ~1638 ms
-  })
+  {
+    boundaries: Metric.exponentialBoundaries({
+      start: 0.1,
+      factor: 2,
+      count: 15, // Up to ~1638 ms
+    }),
+  }
 );
 
 // =============================================================================
@@ -109,11 +113,13 @@ export const storageIdleSnapshots = Metric.counter("mimic.storage.idle_snapshots
  */
 export const storageSnapshotLatency = Metric.histogram(
   "mimic.storage.snapshot_latency_ms",
-  MetricBoundaries.exponential({
-    start: 1,
-    factor: 2,
-    count: 12, // Up to ~4 seconds
-  })
+  {
+    boundaries: Metric.exponentialBoundaries({
+      start: 1,
+      factor: 2,
+      count: 12, // Up to ~4 seconds
+    }),
+  }
 );
 
 /**

@@ -1,0 +1,28 @@
+{
+  "name": "@voidhash/mimic-host",
+  "version": "1.0.0-beta.17",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --env disable --sourcemap=external",
+    "start": "bun run dist/index.js",
+    "typecheck": "tsgo --noEmit",
+    "lint": "biome check .",
+    "format": "biome format . --write"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/sql-mysql2": "catalog:",
+    "@voidhash/mimic": "workspace:*",
+    "@voidhash/mimic-protocol": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@voidhash/tsconfig": "workspace:*",
+    "typescript": "^5"
+  },
+  "engines": {
+    "bun": ">=1.2.20"
+  }
+}

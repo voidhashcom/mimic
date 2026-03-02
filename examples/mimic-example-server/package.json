@@ -1,6 +1,6 @@
 {
   "name": "@voidhash/mimic-server-example",
-  "version": "1.0.0-beta.16",
+  "version": "1.0.0-beta.17",
   "type": "module",
   "private": true,
   "repository": {
@@ -16,15 +16,13 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@effect/platform": "catalog:",
     "@effect/platform-bun": "catalog:",
-    "@voidhash/mimic": "workspace:*",
-    "@voidhash/mimic-effect": "workspace:*",
     "@voidhash/mimic-example-shared": "workspace:*",
+    "@voidhash/mimic-sdk": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.26.0",
+    "@effect/vitest": "catalog:",
     "@voidhash/tsconfig": "workspace:*",
     "typescript": "5.8.3",
     "vitest": "^3.2.4",
