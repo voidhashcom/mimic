@@ -13,7 +13,7 @@ RUN pnpm install --frozen-lockfile
 FROM deps AS build
 COPY --from=pruner /app/out/full/ .
 RUN pnpm install --frozen-lockfile
-RUN cd apps/host && bun run build
+RUN pnpm turbo build --filter=@voidhash/mimic-host...
 
 FROM oven/bun:1 AS release
 WORKDIR /app
