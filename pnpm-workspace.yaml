@@ -12,5 +12,6 @@ catalog:
 onlyBuiltDependencies:
   - '@parcel/watcher'
   - '@typescript/native-preview'
+  - electron
   - esbuild
   - msgpackr-extract

@@ -8,14 +8,14 @@ import { CollectionHandle } from "./CollectionHandle";
 export class DatabaseHandle {
   readonly id: string;
   readonly name: string;
-  readonly description: string | null;
+  readonly description: string;
   private readonly _effect: EffectDatabaseHandle;
   private readonly _runtime: ManagedRuntime.ManagedRuntime<MimicRpcRequirements, never>;
 
   constructor(
     id: string,
     name: string,
-    description: string | null,
+    description: string,
     runtime: ManagedRuntime.ManagedRuntime<MimicRpcRequirements, never>,
   ) {
     this.id = id;

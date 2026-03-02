@@ -20,7 +20,7 @@ export const createDatabase = (options: {
       const client = yield* makeClient();
       const result = yield* client.CreateDatabase({
         name: options.name,
-        description: options.description,
+        description: options.description ?? "",
       });
       return new DatabaseHandle(result.id, result.name, result.description);
     }),
@@ -43,7 +43,7 @@ export const deleteDatabase = (id: string) =>
     }),
   );
 
-export const database = (id: string, name = "", description: string | null = null): DatabaseHandle =>
+export const database = (id: string, name = "", description = ""): DatabaseHandle =>
   new DatabaseHandle(id, name, description);
 
 export const createUser = (options: {

@@ -1,12 +1,19 @@
 {
   "name": "@voidhash/mimic-effect",
-  "version": "1.0.0-beta.16",
+  "version": "1.0.0-beta.17",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/voidhashcom/mimic",
-    "directory": "packages/mimic-server-effect"
+    "url": "https://github.com/voidhashcom/voidhash",
+    "directory": "packages/mimic-effect"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
   "main": "./src/index.ts",
   "exports": {
     ".": {

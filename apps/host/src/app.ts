@@ -22,6 +22,21 @@ import { RpcHandlersLive } from "./rpc/RpcHandlers";
 import { AuthMiddlewareLive } from "./rpc/AuthMiddlewareLive";
 import { WsRoute } from "./ws/WsRouter";
 
+/**
+ * Returns the CORS allowed origins configuration.
+ *
+ * Set `CORS_ORIGINS` to a comma-separated list of allowed origins,
+ * or `*` to allow all origins (disables credentials).
+ *
+ * Defaults to `http://localhost:5173` for local development.
+ */
+const corsAllowedOrigins = (): ReadonlyArray<string> | ((origin: string) => boolean) => {
+  const env = process.env.CORS_ORIGINS?.trim();
+  if (!env) return ["http://localhost:5173", "http://localhost:3003"];
+  if (env === "*") return () => true;
+  return env.split(",").map((o) => o.trim());
+};
+
 // Health check route
 const HealthCheckRoute = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -75,7 +90,7 @@ const AllRoutes = Layer.mergeAll(HealthCheckRoute, WsRoute, RpcLive).pipe(
   Layer.provide(RpcSerialization.layerNdjson),
   Layer.provide(
     HttpRouter.cors({
-      allowedOrigins: ["*"],
+      allowedOrigins: corsAllowedOrigins(),
       credentials: true,
     }),
   ),

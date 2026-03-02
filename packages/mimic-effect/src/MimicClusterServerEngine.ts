@@ -59,7 +59,7 @@ const DEFAULT_SHARD_GROUP = "mimic-documents";
  */
 const EncodedTransactionSchema = Schema.Struct({
   id: Schema.String,
-  ops: Schema.Array(Schema.Unknown),
+  ops: Schema.Array(Schema.Any),
 });
 
 /**
@@ -80,7 +80,7 @@ const SubmitResultSchema = Schema.Union([
  * Schema for snapshot response
  */
 const SnapshotResponseSchema = Schema.Struct({
-  state: Schema.Unknown,
+  state: Schema.Any,
   version: Schema.Number,
 });
 
@@ -88,7 +88,7 @@ const SnapshotResponseSchema = Schema.Struct({
  * Schema for presence entry
  */
 const PresenceEntrySchema = Schema.Struct({
-  data: Schema.Unknown,
+  data: Schema.Any,
   userId: Schema.optional(Schema.String),
 });
 
@@ -106,7 +106,7 @@ const PresenceEventSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("presence_update"),
     id: Schema.String,
-    data: Schema.Unknown,
+    data: Schema.Any,
     userId: Schema.optional(Schema.String),
   }),
   Schema.Struct({
@@ -118,7 +118,7 @@ const PresenceEventSchema = Schema.Union([
 /**
  * Schema for server message (for broadcasts)
  */
-const ServerMessageSchema = Schema.Unknown;
+const ServerMessageSchema = Schema.Any;
 
 // =============================================================================
 // Mimic Document Entity Definition
@@ -142,7 +142,7 @@ const MimicDocumentEntity = Entity.make("MimicDocument", [
 
   // Get tree-like snapshot for rendering
   Rpc.make("GetTreeSnapshot", {
-    success: Schema.Unknown,
+    success: Schema.Any,
   }),
 
   // Touch document to prevent idle GC

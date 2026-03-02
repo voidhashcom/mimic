@@ -14,7 +14,7 @@ function HomeComponent() {
 
   React.useEffect(() => {
     createTodoStore()
-      .then(setStore)
+      .then((s) => setStore(() => s))
       .catch((err) => setError(String(err)))
   }, [])
 
