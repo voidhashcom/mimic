@@ -10,14 +10,20 @@ export interface CollectionInfo {
   readonly name: string;
 }
 
-export interface CredentialInfo {
+export interface UserInfo {
   readonly id: string;
-  readonly label: string;
+  readonly username: string;
+  readonly isSuperuser: boolean;
+}
+
+export interface GrantInfo {
+  readonly id: string;
+  readonly userId: string;
+  readonly databaseId: string;
   readonly permission: string;
 }
 
-export interface CreatedCredential {
-  readonly id: string;
+export interface CreatedDocumentToken {
   readonly token: string;
 }
 

@@ -77,35 +77,82 @@ export const DeleteCollection = Rpc.make("DeleteCollection", {
   error: Schema.String,
 });
 
-// Credential RPCs
+// User RPCs
 
-export const CreateCredential = Rpc.make("CreateCredential", {
+export const CreateUser = Rpc.make("CreateUser", {
   payload: {
-    databaseId: Schema.String,
-    label: Schema.String,
-    permission: Schema.Union([Schema.Literal("read"), Schema.Literal("write"), Schema.Literal("admin")]),
+    username: Schema.String,
+    password: Schema.String,
   },
   success: Schema.Struct({
     id: Schema.String,
-    token: Schema.String,
+    username: Schema.String,
   }),
   error: Schema.String,
 });
 
-export const ListCredentials = Rpc.make("ListCredentials", {
-  payload: { databaseId: Schema.String },
+export const ListUsers = Rpc.make("ListUsers", {
   success: Schema.Array(
     Schema.Struct({
       id: Schema.String,
-      label: Schema.String,
+      username: Schema.String,
+      isSuperuser: Schema.Boolean,
+    }),
+  ),
+});
+
+export const DeleteUser = Rpc.make("DeleteUser", {
+  payload: { id: Schema.String },
+  success: Schema.Void,
+  error: Schema.String,
+});
+
+export const GrantPermission = Rpc.make("GrantPermission", {
+  payload: {
+    userId: Schema.String,
+    databaseId: Schema.String,
+    permission: Schema.Union([Schema.Literal("read"), Schema.Literal("write"), Schema.Literal("admin")]),
+  },
+  success: Schema.Void,
+  error: Schema.String,
+});
+
+export const RevokePermission = Rpc.make("RevokePermission", {
+  payload: {
+    userId: Schema.String,
+    databaseId: Schema.String,
+  },
+  success: Schema.Void,
+  error: Schema.String,
+});
+
+export const ListGrants = Rpc.make("ListGrants", {
+  payload: {
+    userId: Schema.optional(Schema.String),
+  },
+  success: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      userId: Schema.String,
+      databaseId: Schema.String,
       permission: Schema.String,
     }),
   ),
 });
 
-export const DeleteCredential = Rpc.make("DeleteCredential", {
-  payload: { id: Schema.String },
-  success: Schema.Void,
+// Document Token RPCs
+
+export const CreateDocumentToken = Rpc.make("CreateDocumentToken", {
+  payload: {
+    collectionId: Schema.String,
+    documentId: Schema.String,
+    permission: Schema.Union([Schema.Literal("read"), Schema.Literal("write")]),
+    expiresInSeconds: Schema.optional(Schema.Number),
+  },
+  success: Schema.Struct({
+    token: Schema.String,
+  }),
+  error: Schema.String,
 });
 
 // Document RPCs

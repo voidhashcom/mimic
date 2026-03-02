@@ -3,7 +3,8 @@ import { MimicSDKError } from "./errors";
 
 export interface HttpTransportConfig {
   readonly url: string;
-  readonly apiKey?: string;
+  readonly username: string;
+  readonly password: string;
   readonly fetch?: typeof globalThis.fetch;
   readonly timeout?: number;
 }
@@ -19,6 +20,7 @@ export class HttpTransport extends ServiceMap.Service<HttpTransport, HttpTranspo
     const fetchFn = config.fetch ?? globalThis.fetch;
     const timeout = config.timeout ?? 30000;
     const baseUrl = config.url.replace(/\/+$/, "");
+    const basicAuth = btoa(`${config.username}:${config.password}`);
 
     return Layer.succeed(
       HttpTransport,
@@ -27,10 +29,8 @@ export class HttpTransport extends ServiceMap.Service<HttpTransport, HttpTranspo
           Effect.gen(function* () {
             const headers: Record<string, string> = {
               "Content-Type": "application/json",
+              "Authorization": `Basic ${basicAuth}`,
             };
-            if (config.apiKey) {
-              headers["X-API-Key"] = config.apiKey;
-            }
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), timeout);

@@ -1,9 +1,9 @@
 import type { ManagedRuntime } from "effect";
-import { type Primitive, SchemaJSON } from "@voidhash/mimic";
+import type { Primitive } from "@voidhash/mimic";
 import { DatabaseHandle as EffectDatabaseHandle } from "../effect/DatabaseHandle";
 import type { HttpTransport } from "../effect/HttpTransport";
 import type { MimicSDKError } from "../effect/errors";
-import type { CollectionInfo, CredentialInfo, CreatedCredential } from "../effect/types";
+import type { CollectionInfo } from "../effect/types";
 import { CollectionHandle } from "./CollectionHandle";
 
 export class DatabaseHandle {
@@ -47,20 +47,5 @@ export class DatabaseHandle {
     schema: TSchema,
   ): CollectionHandle<TSchema> {
     return new CollectionHandle<TSchema>(id, this.id, schema, this._runtime);
-  }
-
-  async createCredential(options: {
-    label: string;
-    permission: "read" | "write" | "admin";
-  }): Promise<CreatedCredential> {
-    return this._runtime.runPromise(this._effect.createCredential(options));
-  }
-
-  async listCredentials(): Promise<CredentialInfo[]> {
-    return this._runtime.runPromise(this._effect.listCredentials());
-  }
-
-  async deleteCredential(id: string): Promise<void> {
-    return this._runtime.runPromise(this._effect.deleteCredential(id));
   }
 }

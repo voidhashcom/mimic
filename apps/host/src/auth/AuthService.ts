@@ -1,21 +1,31 @@
 import { Effect, Layer, ServiceMap } from "effect";
-import { DatabaseRepositoryTag } from "../mysql/DatabaseRepository";
 import { AuthenticationError, AuthServiceError } from "../engine/Errors";
-import type { Permission } from "../engine/Protocol";
+import { UserServiceTag } from "../services/UserService";
+import { DocumentTokenServiceTag } from "../services/DocumentTokenService";
 
-export interface AuthContext {
+export interface RpcAuthContext {
   readonly userId: string;
-  readonly permission: Permission;
-  readonly databaseId: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly username: string;
+  readonly isSuperuser: boolean;
+}
+
+export interface WsAuthContext {
+  readonly tokenId: string;
+  readonly permission: "read" | "write";
+  readonly collectionId: string;
+  readonly documentId: string;
 }
 
 export interface AuthService {
-  readonly authenticate: (
+  readonly authenticateBasic: (
+    username: string,
+    password: string,
+  ) => Effect.Effect<RpcAuthContext, AuthenticationError | AuthServiceError>;
+  readonly authenticateDocumentToken: (
     token: string,
-    databaseId: string,
+    collectionId: string,
     documentId: string,
-  ) => Effect.Effect<AuthContext, AuthenticationError | AuthServiceError>;
+  ) => Effect.Effect<WsAuthContext, AuthenticationError | AuthServiceError>;
 }
 
 export class AuthServiceTag extends ServiceMap.Service<AuthServiceTag, AuthService>()(
@@ -25,37 +35,48 @@ export class AuthServiceTag extends ServiceMap.Service<AuthServiceTag, AuthServi
 export const AuthServiceLive = Layer.effect(
   AuthServiceTag,
   Effect.gen(function* () {
-    const dbRepo = yield* DatabaseRepositoryTag;
+    const userService = yield* UserServiceTag;
+    const documentTokenService = yield* DocumentTokenServiceTag;
 
     return {
-      authenticate: (token, databaseId, _documentId) =>
+      authenticateBasic: (username, password) =>
         Effect.gen(function* () {
-          // Hash the token and look up the credential
-          const encoder = new TextEncoder();
-          const data = encoder.encode(token);
-          const hashBuffer = yield* Effect.promise(() => crypto.subtle.digest("SHA-256", data));
-          const hashArray = new Uint8Array(hashBuffer);
-          const tokenHash = Array.from(hashArray)
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
-
-          const credential = yield* dbRepo.findCredentialByTokenHash(tokenHash).pipe(
-            Effect.mapError((cause) => new AuthServiceError({ message: "Database lookup failed during authentication", cause })),
+          const user = yield* userService.getByUsername(username).pipe(
+            Effect.mapError(() => new AuthenticationError({ reason: "Invalid credentials" })),
           );
-          if (!credential) {
-            return yield* Effect.fail(new AuthenticationError({ reason: "Invalid token" }));
-          }
 
-          if (credential.databaseId !== databaseId) {
-            return yield* Effect.fail(
-              new AuthenticationError({ reason: "Token not valid for this database" }),
-            );
+          const valid = yield* userService.verifyPassword(user, password).pipe(
+            Effect.mapError((cause) => new AuthServiceError({ message: "Password verification failed", cause })),
+          );
+
+          if (!valid) {
+            return yield* Effect.fail(new AuthenticationError({ reason: "Invalid credentials" }));
           }
 
           return {
-            userId: credential.id,
-            permission: credential.permission,
-            databaseId: credential.databaseId,
+            userId: user.id,
+            username: user.username,
+            isSuperuser: user.isSuperuser,
+          };
+        }),
+
+      authenticateDocumentToken: (token, collectionId, documentId) =>
+        Effect.gen(function* () {
+          const record = yield* documentTokenService.validateAndConsumeToken(token, collectionId, documentId).pipe(
+            Effect.mapError((cause) =>
+              cause._tag === "DocumentTokenNotFoundError" ||
+              cause._tag === "DocumentTokenExpiredError" ||
+              cause._tag === "DocumentTokenAlreadyUsedError"
+                ? new AuthenticationError({ reason: `Token validation failed: ${cause._tag}` })
+                : new AuthServiceError({ message: "Token validation failed", cause }),
+            ),
+          );
+
+          return {
+            tokenId: record.id,
+            permission: record.permission,
+            collectionId: record.collectionId,
+            documentId: record.documentId,
           };
         }),
     };

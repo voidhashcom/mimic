@@ -3,7 +3,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import type * as Socket from "effect/unstable/socket";
 import { Presence } from "@voidhash/mimic";
 import { DocumentGatewayTag } from "../engine/DocumentGateway";
-import { AuthServiceTag, type AuthContext } from "../auth/AuthService";
+import { AuthServiceTag, type WsAuthContext } from "../auth/AuthService";
 import { CollectionRepositoryTag } from "../mysql/CollectionRepository";
 import { SchemaJSON } from "@voidhash/mimic";
 import * as Protocol from "../engine/Protocol";
@@ -14,7 +14,7 @@ interface ConnectionState {
   readonly documentId: string;
   readonly connectionId: string;
   authenticated: boolean;
-  authContext?: AuthContext;
+  authContext?: WsAuthContext;
   hasPresence: boolean;
 }
 
@@ -52,7 +52,7 @@ const handleWebSocketConnection = (
     const handleAuth = (token: string) =>
       Effect.gen(function* () {
         const result = yield* Effect.result(
-          authService.authenticate(token, databaseId, documentId),
+          authService.authenticateDocumentToken(token, collectionId, documentId),
         );
 
         if (result._tag === "Success") {
@@ -60,7 +60,7 @@ const handleWebSocketConnection = (
           state.authContext = result.success;
 
           yield* sendMessage(
-            Protocol.authResultSuccess(result.success.userId, result.success.permission),
+            Protocol.authResultSuccess(result.success.tokenId, result.success.permission),
           );
 
           // Send document snapshot
@@ -99,7 +99,7 @@ const handleWebSocketConnection = (
               yield* sendMessage(Protocol.errorMessage(message.transaction.id, "Not authenticated"));
               return;
             }
-            if (state.authContext?.permission !== "write" && state.authContext?.permission !== "admin") {
+            if (state.authContext?.permission !== "write") {
               yield* sendMessage(
                 Protocol.errorMessage(message.transaction.id, "Write permission required"),
               );
@@ -120,11 +120,11 @@ const handleWebSocketConnection = (
 
           case "presence_set":
             if (!state.authenticated || !state.authContext) return;
-            if (state.authContext.permission !== "write" && state.authContext.permission !== "admin") return;
+            if (state.authContext.permission !== "write") return;
 
             yield* gateway.setPresence(collectionId, documentId, connectionId, {
               data: message.data,
-              userId: state.authContext.userId,
+              userId: state.authContext.tokenId,
             });
             state.hasPresence = true;
             break;

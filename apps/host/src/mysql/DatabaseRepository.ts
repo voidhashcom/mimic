@@ -1,7 +1,7 @@
 import { Effect, Layer, ServiceMap } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { SqlError } from "effect/unstable/sql/SqlError";
-import type { Database, DatabaseCredential } from "../domain/Database";
+import type { Database } from "../domain/Database";
 
 export interface DatabaseRepository {
   readonly create: (id: string, name: string, description: string | null) => Effect.Effect<void, SqlError>;
@@ -9,16 +9,6 @@ export interface DatabaseRepository {
   readonly findByName: (name: string) => Effect.Effect<Database | undefined, SqlError>;
   readonly list: () => Effect.Effect<readonly Database[], SqlError>;
   readonly remove: (id: string) => Effect.Effect<void, SqlError>;
-  readonly createCredential: (
-    id: string,
-    databaseId: string,
-    label: string,
-    tokenHash: string,
-    permission: "read" | "write" | "admin",
-  ) => Effect.Effect<void, SqlError>;
-  readonly findCredentialByTokenHash: (tokenHash: string) => Effect.Effect<DatabaseCredential | undefined, SqlError>;
-  readonly listCredentials: (databaseId: string) => Effect.Effect<readonly DatabaseCredential[], SqlError>;
-  readonly removeCredential: (id: string) => Effect.Effect<void, SqlError>;
 }
 
 export class DatabaseRepositoryTag extends ServiceMap.Service<DatabaseRepositoryTag, DatabaseRepository>()(
@@ -51,22 +41,6 @@ export const DatabaseRepositoryLive: Layer.Layer<DatabaseRepositoryTag, never, S
 
       remove: (id) =>
         sql`DELETE FROM databases WHERE id = ${id}`.pipe(Effect.asVoid),
-
-      createCredential: (id, databaseId, label, tokenHash, permission) =>
-        sql`INSERT INTO database_credentials (id, database_id, label, token_hash, permission) VALUES (${id}, ${databaseId}, ${label}, ${tokenHash}, ${permission})`.pipe(
-          Effect.asVoid,
-        ),
-
-      findCredentialByTokenHash: (tokenHash) =>
-        sql<DatabaseCredential>`SELECT id, database_id AS "databaseId", label, token_hash AS "tokenHash", permission, created_at AS "createdAt" FROM database_credentials WHERE token_hash = ${tokenHash}`.pipe(
-          Effect.map((rows) => rows[0]),
-        ),
-
-      listCredentials: (databaseId) =>
-        sql<DatabaseCredential>`SELECT id, database_id AS "databaseId", label, token_hash AS "tokenHash", permission, created_at AS "createdAt" FROM database_credentials WHERE database_id = ${databaseId}`,
-
-      removeCredential: (id) =>
-        sql`DELETE FROM database_credentials WHERE id = ${id}`.pipe(Effect.asVoid),
     };
   }),
 );

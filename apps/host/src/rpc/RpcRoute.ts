@@ -1,28 +1,14 @@
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { DatabaseRepositoryTag } from "../mysql/DatabaseRepository";
+import { AuthServiceTag, type RpcAuthContext } from "../auth/AuthService";
 import { handleRpc } from "./RpcRouter";
-import type { DatabaseCredential } from "../domain/Database";
 
-const hashApiKey = (apiKey: string) =>
-  Effect.gen(function* () {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(apiKey);
-    const hashBuffer = yield* Effect.promise(() => crypto.subtle.digest("SHA-256", data));
-    const hashArray = new Uint8Array(hashBuffer);
-    return Array.from(hashArray)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  });
-
-export interface RpcAuthContext {
-  readonly credential: DatabaseCredential;
-}
+export { type RpcAuthContext } from "../auth/AuthService";
 
 export const RpcRoute = Layer.effectDiscard(
   Effect.gen(function* () {
     const router = yield* HttpRouter.HttpRouter;
-    const dbRepo = yield* DatabaseRepositoryTag;
+    const authService = yield* AuthServiceTag;
 
     yield* router.add(
       "POST",
@@ -30,17 +16,22 @@ export const RpcRoute = Layer.effectDiscard(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
 
-        // Extract API key from header
-        const apiKey = request.headers["x-api-key"];
+        // Parse Basic auth header
         let authContext: RpcAuthContext | undefined;
+        const authHeader = request.headers["authorization"];
 
-        if (apiKey) {
-          const tokenHash = yield* hashApiKey(apiKey);
-          const credential = yield* dbRepo.findCredentialByTokenHash(tokenHash).pipe(
-            Effect["catch"](() => Effect.succeed(undefined)),
-          );
-          if (credential) {
-            authContext = { credential };
+        if (authHeader && authHeader.startsWith("Basic ")) {
+          const decoded = atob(authHeader.slice(6));
+          const colonIndex = decoded.indexOf(":");
+          if (colonIndex > 0) {
+            const username = decoded.slice(0, colonIndex);
+            const password = decoded.slice(colonIndex + 1);
+            const result = yield* Effect.result(
+              authService.authenticateBasic(username, password),
+            );
+            if (result._tag === "Success") {
+              authContext = result.success;
+            }
           }
         }
 

@@ -3,7 +3,7 @@ import type { Primitive } from "@voidhash/mimic";
 import { CollectionHandle as EffectCollectionHandle } from "../effect/CollectionHandle";
 import type { HttpTransport } from "../effect/HttpTransport";
 import type { MimicSDKError } from "../effect/errors";
-import type { DocumentSnapshot } from "../effect/types";
+import type { DocumentSnapshot, CreatedDocumentToken } from "../effect/types";
 
 export class CollectionHandle<TSchema extends Primitive.AnyPrimitive> {
   readonly id: string;
@@ -56,5 +56,13 @@ export class CollectionHandle<TSchema extends Primitive.AnyPrimitive> {
 
   async list(): Promise<DocumentSnapshot<Primitive.InferState<TSchema>>[]> {
     return this._runtime.runPromise(this._effect.list());
+  }
+
+  async createDocumentToken(
+    documentId: string,
+    permission: "read" | "write",
+    expiresInSeconds?: number,
+  ): Promise<CreatedDocumentToken> {
+    return this._runtime.runPromise(this._effect.createDocumentToken(documentId, permission, expiresInSeconds));
   }
 }

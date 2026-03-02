@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import type { Primitive } from "@voidhash/mimic";
 import { HttpTransport } from "./HttpTransport";
 import type { MimicSDKError } from "./errors";
-import type { DocumentSnapshot } from "./types";
+import type { DocumentSnapshot, CreatedDocumentToken } from "./types";
 
 export class CollectionHandle<TSchema extends Primitive.AnyPrimitive> {
   readonly id: string;
@@ -96,6 +96,24 @@ export class CollectionHandle<TSchema extends Primitive.AnyPrimitive> {
         collectionId,
       });
       return result as DocumentSnapshot<Primitive.InferState<TSchema>>[];
+    });
+  }
+
+  createDocumentToken(
+    documentId: string,
+    permission: "read" | "write",
+    expiresInSeconds?: number,
+  ): Effect.Effect<CreatedDocumentToken, MimicSDKError, HttpTransport> {
+    const collectionId = this.id;
+    return Effect.gen(function* () {
+      const transport = yield* HttpTransport;
+      const result = yield* transport.rpc("CreateDocumentToken", {
+        collectionId,
+        documentId,
+        permission,
+        expiresInSeconds,
+      });
+      return result as CreatedDocumentToken;
     });
   }
 }

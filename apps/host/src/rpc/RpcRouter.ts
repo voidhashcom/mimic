@@ -2,19 +2,35 @@ import { Effect } from "effect";
 import { Document, Transaction, SchemaJSON, type Primitive } from "@voidhash/mimic";
 import { DatabaseServiceTag } from "../services/DatabaseService";
 import { CollectionServiceTag } from "../services/CollectionService";
-import { DatabaseRepositoryTag } from "../mysql/DatabaseRepository";
+import { UserServiceTag } from "../services/UserService";
+import { DocumentTokenServiceTag } from "../services/DocumentTokenService";
 import { DocumentGatewayTag } from "../engine/DocumentGateway";
 import { DocumentRepositoryTag } from "../mysql/DocumentRepository";
-import type { RpcAuthContext } from "./RpcRoute";
+import type { RpcAuthContext } from "../auth/AuthService";
 
-const ADMIN_ONLY_METHODS = new Set([
+const SUPERUSER_ONLY_METHODS = new Set([
   "CreateDatabase",
   "DeleteDatabase",
+  "ListDatabases",
+  "CreateUser",
+  "DeleteUser",
+  "ListUsers",
+  "GrantPermission",
+  "RevokePermission",
+]);
+
+const DATABASE_SCOPED_METHODS = new Set([
   "CreateCollection",
   "DeleteCollection",
-  "CreateCredential",
-  "DeleteCredential",
+  "ListCollections",
   "UpdateCollectionSchema",
+  "CreateDocument",
+  "GetDocument",
+  "UpdateDocument",
+  "SetDocument",
+  "DeleteDocument",
+  "ListDocuments",
+  "CreateDocumentToken",
 ]);
 
 const WRITE_METHODS = new Set([
@@ -22,14 +38,13 @@ const WRITE_METHODS = new Set([
   "UpdateDocument",
   "SetDocument",
   "DeleteDocument",
+  "CreateDocumentToken",
 ]);
 
-const READ_METHODS = new Set([
-  "GetDocument",
-  "ListDocuments",
-  "ListDatabases",
-  "ListCollections",
-  "ListCredentials",
+const ADMIN_METHODS = new Set([
+  "CreateCollection",
+  "DeleteCollection",
+  "UpdateCollectionSchema",
 ]);
 
 const mapServiceError = (e: { _tag: string; [key: string]: any }) => {
@@ -44,8 +59,15 @@ const mapServiceError = (e: { _tag: string; [key: string]: any }) => {
       return { error: `Collection not found: ${e.collectionId}` };
     case "DocumentNotFoundError":
       return { error: `Document not found: ${e.documentId}` };
+    case "UserAlreadyExistsError":
+      return { error: `User '${e.username}' already exists` };
+    case "UserNotFoundError":
+      return { error: `User not found: ${e.userId}` };
+    case "GrantNotFoundError":
+      return { error: `Grant not found for user ${e.userId} on database ${e.databaseId}` };
     case "DatabaseServiceError":
     case "CollectionServiceError":
+    case "UserServiceError":
       return { error: `Internal error: ${e.message}` };
     default:
       return { error: String(e) };
@@ -54,23 +76,15 @@ const mapServiceError = (e: { _tag: string; [key: string]: any }) => {
 
 const requireAuth = (auth: RpcAuthContext | undefined, method: string) => {
   if (!auth) {
-    return Effect.fail({ error: `Authentication required for ${method}. Provide X-API-Key header.` });
+    return Effect.fail({ error: `Authentication required for ${method}. Provide Authorization: Basic header.` });
   }
+  return Effect.void;
+};
 
-  const permission = auth.credential.permission;
-
-  if (ADMIN_ONLY_METHODS.has(method)) {
-    if (permission !== "admin") {
-      return Effect.fail({ error: `Admin permission required for ${method}` });
-    }
-  } else if (WRITE_METHODS.has(method)) {
-    if (permission !== "write" && permission !== "admin") {
-      return Effect.fail({ error: `Write permission required for ${method}` });
-    }
-  } else if (READ_METHODS.has(method)) {
-    // Any valid credential can read
+const requireSuperuser = (auth: RpcAuthContext, method: string) => {
+  if (!auth.isSuperuser) {
+    return Effect.fail({ error: `Superuser permission required for ${method}` });
   }
-
   return Effect.void;
 };
 
@@ -78,14 +92,55 @@ export const handleRpc = (method: string, payload: any, auth?: RpcAuthContext) =
   Effect.gen(function* () {
     const dbService = yield* DatabaseServiceTag;
     const collectionService = yield* CollectionServiceTag;
-    const dbRepo = yield* DatabaseRepositoryTag;
+    const userService = yield* UserServiceTag;
+    const documentTokenService = yield* DocumentTokenServiceTag;
     const gateway = yield* DocumentGatewayTag;
     const docRepo = yield* DocumentRepositoryTag;
 
-    // Check authorization
+    // Check authentication
     yield* requireAuth(auth, method);
+    const authCtx = auth!;
+
+    // Superuser-only methods
+    if (SUPERUSER_ONLY_METHODS.has(method)) {
+      yield* requireSuperuser(authCtx, method);
+    }
+
+    // Database-scoped methods: check user has grant on the relevant database
+    if (DATABASE_SCOPED_METHODS.has(method)) {
+      if (!authCtx.isSuperuser) {
+        // Resolve databaseId from collection if needed
+        let databaseId: string | undefined;
+        if (payload.databaseId) {
+          databaseId = payload.databaseId;
+        } else if (payload.collectionId) {
+          const collection = yield* collectionService.getById(payload.collectionId).pipe(
+            Effect.mapError(mapServiceError),
+          );
+          databaseId = collection.databaseId;
+        }
+
+        if (databaseId) {
+          const grant = yield* userService.getUserPermissionForDatabase(authCtx.userId, databaseId).pipe(
+            Effect.mapError(mapServiceError),
+          );
+          if (!grant) {
+            return yield* Effect.fail({ error: `No permission on database ${databaseId}` });
+          }
+
+          // Check permission level
+          if (ADMIN_METHODS.has(method) && grant.permission !== "admin") {
+            return yield* Effect.fail({ error: `Admin permission required for ${method}` });
+          }
+          if (WRITE_METHODS.has(method) && grant.permission === "read") {
+            return yield* Effect.fail({ error: `Write permission required for ${method}` });
+          }
+        }
+      }
+    }
 
     switch (method) {
+      // Database RPCs
       case "CreateDatabase": {
         const db = yield* dbService.create(payload.name, payload.description).pipe(
           Effect.mapError(mapServiceError),
@@ -103,6 +158,7 @@ export const handleRpc = (method: string, payload: any, auth?: RpcAuthContext) =
         return null;
       }
 
+      // Collection RPCs
       case "CreateCollection": {
         const collection = yield* collectionService
           .create(payload.databaseId, payload.name, payload.schemaJson)
@@ -129,43 +185,61 @@ export const handleRpc = (method: string, payload: any, auth?: RpcAuthContext) =
         return { id: updated.id, schemaVersion: updated.schemaVersion };
       }
 
-      case "CreateCredential": {
-        // Generate a random token
-        const tokenBytes = new Uint8Array(32);
-        crypto.getRandomValues(tokenBytes);
-        const token = Array.from(tokenBytes)
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
-
-        // Hash it for storage
-        const encoder = new TextEncoder();
-        const data = encoder.encode(token);
-        const hashBuffer = yield* Effect.promise(() => crypto.subtle.digest("SHA-256", data));
-        const hashArray = new Uint8Array(hashBuffer);
-        const tokenHash = Array.from(hashArray)
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
-
-        const cred = yield* dbService
-          .createCredential(payload.databaseId, payload.label, tokenHash, payload.permission)
-          .pipe(Effect.mapError(mapServiceError));
-        return { id: cred.id, token };
-      }
-
-      case "ListCredentials": {
-        const creds = yield* dbService.listCredentials(payload.databaseId).pipe(
+      // User RPCs
+      case "CreateUser": {
+        const user = yield* userService.createUser(payload.username, payload.password).pipe(
           Effect.mapError(mapServiceError),
         );
-        return creds.map((c) => ({ id: c.id, label: c.label, permission: c.permission }));
+        return { id: user.id, username: user.username };
       }
 
-      case "DeleteCredential": {
-        yield* dbService.removeCredential(payload.id).pipe(Effect.mapError(mapServiceError));
+      case "ListUsers": {
+        const users = yield* userService.listUsers().pipe(Effect.mapError(mapServiceError));
+        return users.map((u) => ({ id: u.id, username: u.username, isSuperuser: u.isSuperuser }));
+      }
+
+      case "DeleteUser": {
+        yield* userService.deleteUser(payload.id).pipe(Effect.mapError(mapServiceError));
         return null;
       }
 
-      // Document RPCs
+      case "GrantPermission": {
+        yield* userService
+          .grantPermission(payload.userId, payload.databaseId, payload.permission)
+          .pipe(Effect.mapError(mapServiceError));
+        return null;
+      }
 
+      case "RevokePermission": {
+        yield* userService
+          .revokePermission(payload.userId, payload.databaseId)
+          .pipe(Effect.mapError(mapServiceError));
+        return null;
+      }
+
+      case "ListGrants": {
+        // Superuser sees all, others see own
+        const userId = authCtx.isSuperuser ? payload.userId : authCtx.userId;
+        const grants = yield* userService.listGrants(userId).pipe(
+          Effect.mapError(mapServiceError),
+        );
+        return grants.map((g) => ({
+          id: g.id,
+          userId: g.userId,
+          databaseId: g.databaseId,
+          permission: g.permission,
+        }));
+      }
+
+      // Document Token RPCs
+      case "CreateDocumentToken": {
+        const result = yield* documentTokenService
+          .createToken(payload.collectionId, payload.documentId, payload.permission, payload.expiresInSeconds)
+          .pipe(Effect.mapError(mapServiceError));
+        return { token: result.token };
+      }
+
+      // Document RPCs
       case "CreateDocument": {
         const collection = yield* collectionService.getById(payload.collectionId).pipe(
           Effect.mapError(mapServiceError),
@@ -174,26 +248,22 @@ export const handleRpc = (method: string, payload: any, auth?: RpcAuthContext) =
 
         const documentId = payload.id ?? crypto.randomUUID();
 
-        // Create document with initial data
         const doc = Document.make(schema, { initial: payload.data });
         doc.transaction((root: any) => {
           root.set(payload.data);
         });
         const tx = doc.flush();
 
-        // Create metadata row
         yield* docRepo.create(documentId, payload.collectionId).pipe(
           Effect.mapError((cause) => ({ error: `Failed to create document: ${cause}` })),
         );
 
-        // Submit transaction to gateway
         if (!Transaction.isEmpty(tx)) {
           yield* gateway.submit(payload.collectionId, documentId, tx).pipe(
             Effect.mapError((cause) => ({ error: `Failed to submit document transaction: ${cause}` })),
           );
         }
 
-        // Get the snapshot back
         const snapshot = yield* gateway.getSnapshot(payload.collectionId, documentId).pipe(
           Effect.mapError((cause) => ({ error: `Failed to get document snapshot: ${cause}` })),
         );
@@ -239,12 +309,10 @@ export const handleRpc = (method: string, payload: any, auth?: RpcAuthContext) =
         );
         const schema = SchemaJSON.fromJSON(collection.schemaJson) as Primitive.AnyPrimitive;
 
-        // Get current state
         const currentSnapshot = yield* gateway.getSnapshot(payload.collectionId, payload.documentId).pipe(
           Effect.mapError((cause) => ({ error: `Failed to get document snapshot: ${cause}` })),
         );
 
-        // Create document with current state and apply partial update
         const document = Document.make(schema, { initialState: currentSnapshot.state as any });
         document.transaction((root: any) => {
           root.update(payload.data);
@@ -277,12 +345,10 @@ export const handleRpc = (method: string, payload: any, auth?: RpcAuthContext) =
         );
         const schema = SchemaJSON.fromJSON(collection.schemaJson) as Primitive.AnyPrimitive;
 
-        // Get current state
         const currentSnap = yield* gateway.getSnapshot(payload.collectionId, payload.documentId).pipe(
           Effect.mapError((cause) => ({ error: `Failed to get document snapshot: ${cause}` })),
         );
 
-        // Create document with current state and do full replace
         const document = Document.make(schema, { initialState: currentSnap.state as any });
         document.transaction((root: any) => {
           root.set(payload.data);

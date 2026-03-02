@@ -4,8 +4,9 @@ export { CollectionHandle } from "./promise/CollectionHandle";
 export type {
   DatabaseInfo,
   CollectionInfo,
-  CredentialInfo,
-  CreatedCredential,
+  UserInfo,
+  GrantInfo,
+  CreatedDocumentToken,
   DocumentSnapshot,
 } from "./effect/types";
 export type { HttpTransportConfig } from "./effect/HttpTransport";

@@ -8,23 +8,10 @@ export interface Database {
   readonly updatedAt: Date;
 }
 
-export interface DatabaseCredential {
-  readonly id: string;
-  readonly databaseId: string;
-  readonly label: string;
-  readonly tokenHash: string;
-  readonly permission: "read" | "write" | "admin";
-  readonly createdAt: Date;
-}
-
 export class DatabaseNotFoundError extends Data.TaggedError("DatabaseNotFoundError")<{
   readonly databaseId: string;
 }> {}
 
 export class DatabaseAlreadyExistsError extends Data.TaggedError("DatabaseAlreadyExistsError")<{
   readonly name: string;
-}> {}
-
-export class CredentialNotFoundError extends Data.TaggedError("CredentialNotFoundError")<{
-  readonly credentialId: string;
 }> {}

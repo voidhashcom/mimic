@@ -6,9 +6,14 @@ import { MysqlLive } from "./mysql/MysqlLayer";
 import { DatabaseRepositoryLive } from "./mysql/DatabaseRepository";
 import { CollectionRepositoryLive } from "./mysql/CollectionRepository";
 import { DocumentRepositoryLive } from "./mysql/DocumentRepository";
+import { UserRepositoryLive } from "./mysql/UserRepository";
+import { DocumentTokenRepositoryLive } from "./mysql/DocumentTokenRepository";
 import { DatabaseServiceLive } from "./services/DatabaseService";
 import { CollectionServiceLive } from "./services/CollectionService";
+import { UserServiceLive } from "./services/UserService";
+import { DocumentTokenServiceLive } from "./services/DocumentTokenService";
 import { AuthServiceLive } from "./auth/AuthService";
+import { BootstrapLive } from "./services/BootstrapService";
 import { MimicDocumentEntityLive } from "./engine/DocumentEntity";
 import { DocumentGatewayLive } from "./engine/DocumentGateway";
 import { RpcRoute } from "./rpc/RpcRoute";
@@ -27,13 +32,21 @@ const RepositoryLayers = Layer.mergeAll(
   DatabaseRepositoryLive,
   CollectionRepositoryLive,
   DocumentRepositoryLive,
+  UserRepositoryLive,
+  DocumentTokenRepositoryLive,
 );
 
-// Service layers (depend on repositories)
-const ServiceLayers = Layer.mergeAll(
+// Core service layers (depend on repositories)
+const CoreServiceLayers = Layer.mergeAll(
   DatabaseServiceLive,
   CollectionServiceLive,
-  AuthServiceLive,
+  UserServiceLive,
+  DocumentTokenServiceLive,
+);
+
+// Auth depends on UserService + DocumentTokenService, so provide core services to it
+const ServiceLayers = AuthServiceLive.pipe(
+  Layer.provideMerge(CoreServiceLayers),
 );
 
 // Sharding layer (TestRunner for development)
@@ -63,6 +76,8 @@ export const AppLive = HttpRouter.serve(AllRoutes).pipe(
   Layer.provide(EntityLayer),
   // Provide sharding
   Layer.provide(ShardingLive),
+  // Bootstrap root user
+  Layer.provide(BootstrapLive),
   // Provide services
   Layer.provide(ServiceLayers),
   // Provide repositories

@@ -3,8 +3,9 @@ export { MimicSDKError } from "./errors";
 export type {
   DatabaseInfo,
   CollectionInfo,
-  CredentialInfo,
-  CreatedCredential,
+  UserInfo,
+  GrantInfo,
+  CreatedDocumentToken,
   DocumentSnapshot,
 } from "./types";
 export { DatabaseHandle } from "./DatabaseHandle";

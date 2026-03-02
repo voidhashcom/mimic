@@ -54,3 +54,8 @@ export class DocumentGatewayError extends Data.TaggedError("DocumentGatewayError
   readonly message: string;
   readonly cause: unknown;
 }> {}
+
+export class UserServiceError extends Data.TaggedError("UserServiceError")<{
+  readonly message: string;
+  readonly cause: unknown;
+}> {}
