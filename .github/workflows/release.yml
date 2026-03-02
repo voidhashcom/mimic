@@ -72,5 +72,6 @@ jobs:
           pnpm publish --filter=@voidhash/mimic-cli --access public --no-git-checks --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
           pnpm publish --filter=@voidhash/mimic-admin --access public --no-git-checks --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
           pnpm publish --filter=@voidhash/mimic-protocol --access public --no-git-checks --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
+          pnpm publish --filter=@voidhash/mimic-sdk --access public --no-git-checks --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
