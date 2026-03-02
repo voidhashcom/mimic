@@ -12,6 +12,7 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY --from=pruner /app/out/full/ .
+RUN pnpm install --frozen-lockfile
 RUN cd apps/host && bun run build
 
 FROM oven/bun:1 AS release
