@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schedule } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { MimicSDK, MimicClientLayer } from "@voidhash/mimic-sdk/effect";
 import { MimicExampleSchema } from "@voidhash/mimic-example-shared";
@@ -7,18 +7,18 @@ import { MimicExampleSchema } from "@voidhash/mimic-example-shared";
 // Config
 // ---------------------------------------------------------------------------
 
-const HOST_URL = process.env.HOST_URL ?? "http://localhost:5001";
-const HOST_USERNAME = process.env.HOST_USERNAME ?? "root";
-const HOST_PASSWORD = process.env.HOST_PASSWORD ?? "root";
+const HOST_URL = process.env.HOST_URL;
+const HOST_USERNAME = process.env.HOST_USERNAME;
+const HOST_PASSWORD = process.env.HOST_PASSWORD;
 
 const DATABASE_NAME = "example";
 const COLLECTION_NAME = "todos";
 const DOCUMENT_ID = "kanban-board";
 
 const SdkLayer = MimicClientLayer({
-  url: HOST_URL,
-  username: HOST_USERNAME,
-  password: HOST_PASSWORD,
+  url: HOST_URL ?? "http://localhost:5001",
+  username: HOST_USERNAME ?? "root",
+  password: HOST_PASSWORD ?? "password",
 });
 
 // ---------------------------------------------------------------------------
@@ -27,23 +27,35 @@ const SdkLayer = MimicClientLayer({
 
 const provision = Effect.gen(function* () {
   // Ensure database exists
+  yield* Effect.log("Provision: listing databases...");
   const databases = yield* MimicSDK.listDatabases();
+  yield* Effect.log(`Provision: found ${databases.length} databases`);
   const existingDb = databases.find((d) => d.name === DATABASE_NAME);
   const dbHandle = existingDb
     ? MimicSDK.database(existingDb.id, existingDb.name, existingDb.description)
     : yield* MimicSDK.createDatabase({ name: DATABASE_NAME });
+  yield* Effect.log(`Provision: db=${dbHandle.id}`);
 
   // Ensure collection exists
+  yield* Effect.log("Provision: listing collections...");
   const collections = yield* dbHandle.listCollections();
+  yield* Effect.log(`Provision: found ${collections.length} collections`);
   const existingCol = collections.find((c) => c.name === COLLECTION_NAME);
+
+  yield* Effect.log(
+    `Provision: ${existingCol ? "found" : "creating"} collection...`,
+  );
   const colHandle = existingCol
     ? dbHandle.collection(existingCol.id, MimicExampleSchema)
     : yield* dbHandle.createCollection(COLLECTION_NAME, MimicExampleSchema);
+  yield* Effect.log(`Provision: col=${colHandle.id}`);
 
   // Ensure document exists — create with default board if missing
+  yield* Effect.log("Provision: checking document...");
   yield* colHandle.get(DOCUMENT_ID).pipe(
-    Effect.catch(() =>
-      colHandle.create(
+    Effect.tap(() => Effect.log("Provision: document exists")),
+    Effect.catch(() => {
+      return colHandle.create(
         {
           type: "board" as const,
           name: "My Board",
@@ -54,8 +66,8 @@ const provision = Effect.gen(function* () {
           ],
         },
         { id: DOCUMENT_ID },
-      ),
-    ),
+      );
+    }),
   );
 
   yield* Effect.log(
@@ -63,7 +75,14 @@ const provision = Effect.gen(function* () {
   );
 
   return { dbHandle, colHandle } as const;
-});
+}).pipe(
+  Effect.tapCause((cause) => Effect.log(`Provision failed: ${cause}`)),
+  Effect.retry(
+    Schedule.exponential("1 second").pipe(
+      Schedule.compose(Schedule.recurs(15)),
+    ),
+  ),
+);
 
 // ---------------------------------------------------------------------------
 // HTTP routes
@@ -99,7 +118,7 @@ const AllRoutes = Layer.mergeAll(TokenRoute).pipe(
   Layer.provide(SdkLayer),
   Layer.provide(
     HttpRouter.cors({
-      allowedOrigins: ["http://localhost:3000"],
+      allowedOrigins: ["http://localhost:5173"],
       credentials: true,
     }),
   ),

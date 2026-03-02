@@ -22,25 +22,25 @@ export const DatabaseRepositoryLive: Layer.Layer<DatabaseRepositoryTag, never, S
 
     return {
       create: (id, name, description) =>
-        sql`INSERT INTO databases (id, name, description) VALUES (${id}, ${name}, ${description})`.pipe(
+        sql`INSERT INTO mimic_databases (id, name, description) VALUES (${id}, ${name}, ${description})`.pipe(
           Effect.asVoid,
         ),
 
       findById: (id) =>
-        sql<Database>`SELECT id, name, description, created_at AS "createdAt", updated_at AS "updatedAt" FROM databases WHERE id = ${id}`.pipe(
+        sql<Database>`SELECT id, name, description, created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_databases WHERE id = ${id}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       findByName: (name) =>
-        sql<Database>`SELECT id, name, description, created_at AS "createdAt", updated_at AS "updatedAt" FROM databases WHERE name = ${name}`.pipe(
+        sql<Database>`SELECT id, name, description, created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_databases WHERE name = ${name}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       list: () =>
-        sql<Database>`SELECT id, name, description, created_at AS "createdAt", updated_at AS "updatedAt" FROM databases ORDER BY created_at DESC`,
+        sql<Database>`SELECT id, name, description, created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_databases ORDER BY created_at DESC`,
 
       remove: (id) =>
-        sql`DELETE FROM databases WHERE id = ${id}`.pipe(Effect.asVoid),
+        sql`DELETE FROM mimic_databases WHERE id = ${id}`.pipe(Effect.asVoid),
     };
   }),
 );

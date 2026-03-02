@@ -25,38 +25,38 @@ export const CollectionRepositoryLive: Layer.Layer<CollectionRepositoryTag, neve
     return {
       create: (id, databaseId, name, schemaJson) =>
         Effect.gen(function* () {
-          yield* sql`INSERT INTO collections (id, database_id, name, schema_json) VALUES (${id}, ${databaseId}, ${name}, ${JSON.stringify(schemaJson)})`.pipe(
+          yield* sql`INSERT INTO mimic_collections (id, database_id, name, schema_json) VALUES (${id}, ${databaseId}, ${name}, ${JSON.stringify(schemaJson)})`.pipe(
             Effect.asVoid,
           );
           // Insert initial schema version history row
-          yield* sql`INSERT INTO collection_schema_versions (collection_id, version, schema_json) VALUES (${id}, 1, ${JSON.stringify(schemaJson)})`.pipe(
+          yield* sql`INSERT INTO mimic_collection_schema_versions (collection_id, version, schema_json) VALUES (${id}, 1, ${JSON.stringify(schemaJson)})`.pipe(
             Effect.asVoid,
           );
         }),
 
       findById: (id) =>
-        sql<Collection>`SELECT id, database_id AS "databaseId", name, schema_json AS "schemaJson", schema_version AS "schemaVersion", created_at AS "createdAt", updated_at AS "updatedAt" FROM collections WHERE id = ${id}`.pipe(
+        sql<Collection>`SELECT id, database_id AS "databaseId", name, schema_json AS "schemaJson", schema_version AS "schemaVersion", created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_collections WHERE id = ${id}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       findByDatabaseAndName: (databaseId, name) =>
-        sql<Collection>`SELECT id, database_id AS "databaseId", name, schema_json AS "schemaJson", schema_version AS "schemaVersion", created_at AS "createdAt", updated_at AS "updatedAt" FROM collections WHERE database_id = ${databaseId} AND name = ${name}`.pipe(
+        sql<Collection>`SELECT id, database_id AS "databaseId", name, schema_json AS "schemaJson", schema_version AS "schemaVersion", created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_collections WHERE database_id = ${databaseId} AND name = ${name}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       listByDatabase: (databaseId) =>
-        sql<Collection>`SELECT id, database_id AS "databaseId", name, schema_json AS "schemaJson", schema_version AS "schemaVersion", created_at AS "createdAt", updated_at AS "updatedAt" FROM collections WHERE database_id = ${databaseId} ORDER BY created_at DESC`,
+        sql<Collection>`SELECT id, database_id AS "databaseId", name, schema_json AS "schemaJson", schema_version AS "schemaVersion", created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_collections WHERE database_id = ${databaseId} ORDER BY created_at DESC`,
 
       publishSchema: (id, schemaJson) =>
         Effect.gen(function* () {
-          const rows = yield* sql<{ schemaVersion: number }>`SELECT schema_version AS "schemaVersion" FROM collections WHERE id = ${id}`;
+          const rows = yield* sql<{ schemaVersion: number }>`SELECT schema_version AS "schemaVersion" FROM mimic_collections WHERE id = ${id}`;
           const newVersion = (rows[0]?.schemaVersion ?? 0) + 1;
 
-          yield* sql`INSERT INTO collection_schema_versions (collection_id, version, schema_json) VALUES (${id}, ${newVersion}, ${JSON.stringify(schemaJson)})`.pipe(
+          yield* sql`INSERT INTO mimic_collection_schema_versions (collection_id, version, schema_json) VALUES (${id}, ${newVersion}, ${JSON.stringify(schemaJson)})`.pipe(
             Effect.asVoid,
           );
 
-          yield* sql`UPDATE collections SET schema_json = ${JSON.stringify(schemaJson)}, schema_version = ${newVersion} WHERE id = ${id}`.pipe(
+          yield* sql`UPDATE mimic_collections SET schema_json = ${JSON.stringify(schemaJson)}, schema_version = ${newVersion} WHERE id = ${id}`.pipe(
             Effect.asVoid,
           );
 
@@ -64,12 +64,12 @@ export const CollectionRepositoryLive: Layer.Layer<CollectionRepositoryTag, neve
         }),
 
       findSchemaVersion: (collectionId, version) =>
-        sql<{ schemaJson: unknown }>`SELECT schema_json AS "schemaJson" FROM collection_schema_versions WHERE collection_id = ${collectionId} AND version = ${version}`.pipe(
+        sql<{ schemaJson: unknown }>`SELECT schema_json AS "schemaJson" FROM mimic_collection_schema_versions WHERE collection_id = ${collectionId} AND version = ${version}`.pipe(
           Effect.map((rows) => rows[0]?.schemaJson),
         ),
 
       remove: (id) =>
-        sql`DELETE FROM collections WHERE id = ${id}`.pipe(Effect.asVoid),
+        sql`DELETE FROM mimic_collections WHERE id = ${id}`.pipe(Effect.asVoid),
     };
   }),
 );

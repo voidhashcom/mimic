@@ -1,7 +1,7 @@
 export interface DatabaseInfo {
   readonly id: string;
   readonly name: string;
-  readonly description: string | null;
+  readonly description: string;
 }
 
 export interface CollectionInfo {

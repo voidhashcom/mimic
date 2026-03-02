@@ -30,7 +30,7 @@ import type { PresenceEvent } from "./Presence";
 
 const EncodedTransactionSchema = Schema.Struct({
   id: Schema.String,
-  ops: Schema.Array(Schema.Unknown),
+  ops: Schema.Array(Schema.Any),
 });
 
 const SubmitResultSchema = Schema.Union([
@@ -45,12 +45,12 @@ const SubmitResultSchema = Schema.Union([
 ]);
 
 const SnapshotResponseSchema = Schema.Struct({
-  state: Schema.Unknown,
+  state: Schema.Any,
   version: Schema.Number,
 });
 
 const PresenceEntrySchema = Schema.Struct({
-  data: Schema.Unknown,
+  data: Schema.Any,
   userId: Schema.optional(Schema.String),
 });
 
@@ -71,7 +71,7 @@ export const MimicDocumentEntity = Entity.make("MimicDocument", [
   }),
 
   Rpc.make("GetTreeSnapshot", {
-    success: Schema.Unknown,
+    success: Schema.Any,
   }),
 
   Rpc.make("Touch", {

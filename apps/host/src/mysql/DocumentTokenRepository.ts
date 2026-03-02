@@ -37,23 +37,23 @@ export const DocumentTokenRepositoryLive: Layer.Layer<
 
     return {
       create: (id, tokenHash, collectionId, documentId, permission, expiresAt) =>
-        sql`INSERT INTO document_tokens (id, token_hash, collection_id, document_id, permission, expires_at) VALUES (${id}, ${tokenHash}, ${collectionId}, ${documentId}, ${permission}, ${expiresAt})`.pipe(
+        sql`INSERT INTO mimic_document_tokens (id, token_hash, collection_id, document_id, permission, expires_at) VALUES (${id}, ${tokenHash}, ${collectionId}, ${documentId}, ${permission}, ${expiresAt})`.pipe(
           Effect.asVoid,
         ),
 
       findByTokenHash: (tokenHash) =>
-        sql<DocumentToken>`SELECT id, token_hash AS "tokenHash", collection_id AS "collectionId", document_id AS "documentId", permission, expires_at AS "expiresAt", used_at AS "usedAt", created_at AS "createdAt" FROM document_tokens WHERE token_hash = ${tokenHash}`.pipe(
+        sql<DocumentToken>`SELECT id, token_hash AS "tokenHash", collection_id AS "collectionId", document_id AS "documentId", permission, expires_at AS "expiresAt", used_at AS "usedAt", created_at AS "createdAt" FROM mimic_document_tokens WHERE token_hash = ${tokenHash}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       markUsed: (id) =>
-        sql`UPDATE document_tokens SET used_at = NOW() WHERE id = ${id}`.pipe(Effect.asVoid),
+        sql`UPDATE mimic_document_tokens SET used_at = NOW() WHERE id = ${id}`.pipe(Effect.asVoid),
 
       deleteExpired: () =>
-        sql`DELETE FROM document_tokens WHERE expires_at < NOW()`.pipe(Effect.asVoid),
+        sql`DELETE FROM mimic_document_tokens WHERE expires_at < NOW()`.pipe(Effect.asVoid),
 
       listByDocument: (collectionId, documentId) =>
-        sql<DocumentToken>`SELECT id, token_hash AS "tokenHash", collection_id AS "collectionId", document_id AS "documentId", permission, expires_at AS "expiresAt", used_at AS "usedAt", created_at AS "createdAt" FROM document_tokens WHERE collection_id = ${collectionId} AND document_id = ${documentId}`,
+        sql<DocumentToken>`SELECT id, token_hash AS "tokenHash", collection_id AS "collectionId", document_id AS "documentId", permission, expires_at AS "expiresAt", used_at AS "usedAt", created_at AS "createdAt" FROM mimic_document_tokens WHERE collection_id = ${collectionId} AND document_id = ${documentId}`,
     };
   }),
 );
