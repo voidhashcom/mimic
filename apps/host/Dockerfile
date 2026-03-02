@@ -1,5 +1,6 @@
-FROM oven/bun:1 AS base
+FROM node:22-slim AS base
 WORKDIR /app
+RUN npm install -g pnpm@10 && npm install -g bun
 
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
@@ -7,7 +8,7 @@ COPY apps/host/package.json ./apps/host/
 COPY packages/mimic/package.json ./packages/mimic/
 COPY packages/mimic-protocol/package.json ./packages/mimic-protocol/
 COPY packages/tsconfig/package.json ./packages/tsconfig/
-RUN bun install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
