@@ -1,6 +1,6 @@
 {
   "name": "@voidhash/mimic-server-example",
-  "version": "1.0.0-beta.17",
+  "version": "1.0.0-beta.18",
   "type": "module",
   "private": true,
   "repository": {
@@ -25,6 +25,7 @@
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@voidhash/mimic-cli": "workspace:*",
+    "@voidhash/mimic-admin": "workspace:*",
     "@voidhash/tsconfig": "workspace:*",
     "typescript": "5.8.3",
     "vitest": "^3.2.4",
