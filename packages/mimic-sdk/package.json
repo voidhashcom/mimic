@@ -26,6 +26,7 @@
   },
   "peerDependencies": {
     "@voidhash/mimic": "workspace:*",
+    "@voidhash/mimic-protocol": "workspace:*",
     "effect": "catalog:"
   }
 }

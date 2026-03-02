@@ -1,8 +1,10 @@
 import { Effect } from "effect";
 import type { Primitive } from "@voidhash/mimic";
-import { HttpTransport } from "./HttpTransport";
-import type { MimicSDKError } from "./errors";
+import { RpcClient } from "effect/unstable/rpc";
+import { MimicRpcs } from "@voidhash/mimic-protocol";
 import type { DocumentSnapshot, CreatedDocumentToken } from "./types";
+
+const makeClient = () => RpcClient.make(MimicRpcs);
 
 export class CollectionHandle<TSchema extends Primitive.AnyPrimitive> {
   readonly id: string;
@@ -15,105 +17,104 @@ export class CollectionHandle<TSchema extends Primitive.AnyPrimitive> {
     this.schema = schema;
   }
 
-  create(
-    data: Primitive.InferSetInput<TSchema>,
-    options?: { id?: string },
-  ): Effect.Effect<DocumentSnapshot<Primitive.InferState<TSchema>>, MimicSDKError, HttpTransport> {
+  create(data: Primitive.InferSetInput<TSchema>, options?: { id?: string }) {
     const collectionId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const result = yield* transport.rpc("CreateDocument", {
-        collectionId,
-        id: options?.id,
-        data,
-      });
-      return result as DocumentSnapshot<Primitive.InferState<TSchema>>;
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const result = yield* client.CreateDocument({
+          collectionId,
+          id: options?.id,
+          data,
+        });
+        return result as unknown as DocumentSnapshot<Primitive.InferState<TSchema>>;
+      }),
+    );
   }
 
-  get(
-    documentId: string,
-  ): Effect.Effect<DocumentSnapshot<Primitive.InferState<TSchema>>, MimicSDKError, HttpTransport> {
+  get(documentId: string) {
     const collectionId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const result = yield* transport.rpc("GetDocument", {
-        collectionId,
-        documentId,
-      });
-      return result as DocumentSnapshot<Primitive.InferState<TSchema>>;
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const result = yield* client.GetDocument({
+          collectionId,
+          documentId,
+        });
+        return result as unknown as DocumentSnapshot<Primitive.InferState<TSchema>>;
+      }),
+    );
   }
 
-  update(
-    documentId: string,
-    data: Primitive.InferUpdateInput<TSchema>,
-  ): Effect.Effect<{ id: string; version: number }, MimicSDKError, HttpTransport> {
+  update(documentId: string, data: Primitive.InferUpdateInput<TSchema>) {
     const collectionId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const result = yield* transport.rpc("UpdateDocument", {
-        collectionId,
-        documentId,
-        data,
-      });
-      return result as { id: string; version: number };
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const result = yield* client.UpdateDocument({
+          collectionId,
+          documentId,
+          data,
+        });
+        return { id: result.id, version: result.version };
+      }),
+    );
   }
 
-  set(
-    documentId: string,
-    data: Primitive.InferSetInput<TSchema>,
-  ): Effect.Effect<{ id: string; version: number }, MimicSDKError, HttpTransport> {
+  set(documentId: string, data: Primitive.InferSetInput<TSchema>) {
     const collectionId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const result = yield* transport.rpc("SetDocument", {
-        collectionId,
-        documentId,
-        data,
-      });
-      return result as { id: string; version: number };
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const result = yield* client.SetDocument({
+          collectionId,
+          documentId,
+          data,
+        });
+        return { id: result.id, version: result.version };
+      }),
+    );
   }
 
-  delete(documentId: string): Effect.Effect<void, MimicSDKError, HttpTransport> {
+  delete(documentId: string) {
     const collectionId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      yield* transport.rpc("DeleteDocument", {
-        collectionId,
-        documentId,
-      });
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        yield* client.DeleteDocument({
+          collectionId,
+          documentId,
+        });
+      }),
+    );
   }
 
-  list(): Effect.Effect<DocumentSnapshot<Primitive.InferState<TSchema>>[], MimicSDKError, HttpTransport> {
+  list() {
     const collectionId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const result = yield* transport.rpc("ListDocuments", {
-        collectionId,
-      });
-      return result as DocumentSnapshot<Primitive.InferState<TSchema>>[];
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const result = yield* client.ListDocuments({
+          collectionId,
+        });
+        return result as unknown as DocumentSnapshot<Primitive.InferState<TSchema>>[];
+      }),
+    );
   }
 
-  createDocumentToken(
-    documentId: string,
-    permission: "read" | "write",
-    expiresInSeconds?: number,
-  ): Effect.Effect<CreatedDocumentToken, MimicSDKError, HttpTransport> {
+  createDocumentToken(documentId: string, permission: "read" | "write", expiresInSeconds?: number) {
     const collectionId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const result = yield* transport.rpc("CreateDocumentToken", {
-        collectionId,
-        documentId,
-        permission,
-        expiresInSeconds,
-      });
-      return result as CreatedDocumentToken;
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const result = yield* client.CreateDocumentToken({
+          collectionId,
+          documentId,
+          permission,
+          expiresInSeconds,
+        });
+        return { token: result.token } as CreatedDocumentToken;
+      }),
+    );
   }
 }

@@ -1,5 +1,6 @@
 import { Schema } from "effect";
-import { Rpc } from "effect/unstable/rpc";
+import { Rpc, RpcGroup } from "effect/unstable/rpc";
+import { AuthMiddleware } from "./middleware.js";
 
 // Database RPCs
 
@@ -24,6 +25,7 @@ export const ListDatabases = Rpc.make("ListDatabases", {
       description: Schema.NullOr(Schema.String),
     }),
   ),
+  error: Schema.String,
 });
 
 export const DeleteDatabase = Rpc.make("DeleteDatabase", {
@@ -57,6 +59,7 @@ export const ListCollections = Rpc.make("ListCollections", {
       name: Schema.String,
     }),
   ),
+  error: Schema.String,
 });
 
 export const UpdateCollectionSchema = Rpc.make("UpdateCollectionSchema", {
@@ -99,6 +102,7 @@ export const ListUsers = Rpc.make("ListUsers", {
       isSuperuser: Schema.Boolean,
     }),
   ),
+  error: Schema.String,
 });
 
 export const DeleteUser = Rpc.make("DeleteUser", {
@@ -138,6 +142,7 @@ export const ListGrants = Rpc.make("ListGrants", {
       permission: Schema.String,
     }),
   ),
+  error: Schema.String,
 });
 
 // Document Token RPCs
@@ -225,3 +230,28 @@ export const ListDocuments = Rpc.make("ListDocuments", {
   success: Schema.Array(DocumentSnapshotSchema),
   error: Schema.String,
 });
+
+// RPC Group
+
+export const MimicRpcs = RpcGroup.make(
+  CreateDatabase,
+  ListDatabases,
+  DeleteDatabase,
+  CreateCollection,
+  ListCollections,
+  UpdateCollectionSchema,
+  DeleteCollection,
+  CreateUser,
+  ListUsers,
+  DeleteUser,
+  GrantPermission,
+  RevokePermission,
+  ListGrants,
+  CreateDocumentToken,
+  CreateDocument,
+  GetDocument,
+  UpdateDocument,
+  SetDocument,
+  DeleteDocument,
+  ListDocuments,
+).middleware(AuthMiddleware);

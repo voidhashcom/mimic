@@ -1,0 +1,4 @@
+{
+  "extends": "@voidhash/tsconfig/base.json",
+  "include": ["src"]
+}

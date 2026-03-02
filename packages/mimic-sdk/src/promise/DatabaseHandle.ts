@@ -1,8 +1,7 @@
 import type { ManagedRuntime } from "effect";
 import type { Primitive } from "@voidhash/mimic";
 import { DatabaseHandle as EffectDatabaseHandle } from "../effect/DatabaseHandle";
-import type { HttpTransport } from "../effect/HttpTransport";
-import type { MimicSDKError } from "../effect/errors";
+import type { MimicRpcRequirements } from "../effect/MimicSDK";
 import type { CollectionInfo } from "../effect/types";
 import { CollectionHandle } from "./CollectionHandle";
 
@@ -11,13 +10,13 @@ export class DatabaseHandle {
   readonly name: string;
   readonly description: string | null;
   private readonly _effect: EffectDatabaseHandle;
-  private readonly _runtime: ManagedRuntime.ManagedRuntime<HttpTransport, MimicSDKError>;
+  private readonly _runtime: ManagedRuntime.ManagedRuntime<MimicRpcRequirements, never>;
 
   constructor(
     id: string,
     name: string,
     description: string | null,
-    runtime: ManagedRuntime.ManagedRuntime<HttpTransport, MimicSDKError>,
+    runtime: ManagedRuntime.ManagedRuntime<MimicRpcRequirements, never>,
   ) {
     this.id = id;
     this.name = name;
@@ -39,7 +38,7 @@ export class DatabaseHandle {
   }
 
   async deleteCollection(id: string): Promise<void> {
-    return this._runtime.runPromise(this._effect.deleteCollection(id));
+    return this._runtime.runPromise(this._effect.deleteCollection(id)) as Promise<void>;
   }
 
   collection<TSchema extends Primitive.AnyPrimitive>(

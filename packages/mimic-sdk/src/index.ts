@@ -9,4 +9,4 @@ export type {
   CreatedDocumentToken,
   DocumentSnapshot,
 } from "./effect/types";
-export type { HttpTransportConfig } from "./effect/HttpTransport";
+export type { MimicClientConfig } from "./effect/HttpTransport";

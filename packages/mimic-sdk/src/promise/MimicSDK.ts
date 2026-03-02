@@ -1,20 +1,20 @@
 import { ManagedRuntime } from "effect";
-import { HttpTransport, type HttpTransportConfig } from "../effect/HttpTransport";
-import type { MimicSDKError } from "../effect/errors";
+import { MimicClientLayer, type MimicClientConfig } from "../effect/HttpTransport";
+import type { MimicRpcRequirements } from "../effect/MimicSDK";
 import * as EffectMimicSDK from "../effect/MimicSDK";
 import type { DatabaseInfo, UserInfo, GrantInfo } from "../effect/types";
 import { DatabaseHandle } from "./DatabaseHandle";
 
 export class MimicSDK {
-  private readonly _runtime: ManagedRuntime.ManagedRuntime<HttpTransport, MimicSDKError>;
+  private readonly _runtime: ManagedRuntime.ManagedRuntime<MimicRpcRequirements, never>;
 
-  private constructor(runtime: ManagedRuntime.ManagedRuntime<HttpTransport, MimicSDKError>) {
+  private constructor(runtime: ManagedRuntime.ManagedRuntime<MimicRpcRequirements, never>) {
     this._runtime = runtime;
   }
 
-  static create(options: HttpTransportConfig): MimicSDK {
-    const layer = HttpTransport.layer(options);
-    const runtime = ManagedRuntime.make(layer) as ManagedRuntime.ManagedRuntime<HttpTransport, MimicSDKError>;
+  static create(options: MimicClientConfig): MimicSDK {
+    const layer = MimicClientLayer(options);
+    const runtime = ManagedRuntime.make(layer) as ManagedRuntime.ManagedRuntime<MimicRpcRequirements, never>;
     return new MimicSDK(runtime);
   }
 
@@ -28,7 +28,7 @@ export class MimicSDK {
   }
 
   async deleteDatabase(id: string): Promise<void> {
-    return this._runtime.runPromise(EffectMimicSDK.deleteDatabase(id));
+    return this._runtime.runPromise(EffectMimicSDK.deleteDatabase(id)) as Promise<void>;
   }
 
   database(id: string, name = "", description: string | null = null): DatabaseHandle {
@@ -44,7 +44,7 @@ export class MimicSDK {
   }
 
   async deleteUser(id: string): Promise<void> {
-    return this._runtime.runPromise(EffectMimicSDK.deleteUser(id));
+    return this._runtime.runPromise(EffectMimicSDK.deleteUser(id)) as Promise<void>;
   }
 
   async grantPermission(options: {
@@ -52,11 +52,11 @@ export class MimicSDK {
     databaseId: string;
     permission: "read" | "write" | "admin";
   }): Promise<void> {
-    return this._runtime.runPromise(EffectMimicSDK.grantPermission(options));
+    return this._runtime.runPromise(EffectMimicSDK.grantPermission(options)) as Promise<void>;
   }
 
   async revokePermission(options: { userId: string; databaseId: string }): Promise<void> {
-    return this._runtime.runPromise(EffectMimicSDK.revokePermission(options));
+    return this._runtime.runPromise(EffectMimicSDK.revokePermission(options)) as Promise<void>;
   }
 
   async listGrants(userId?: string): Promise<GrantInfo[]> {

@@ -15,6 +15,7 @@
 		"@effect/platform-bun": "catalog:",
 		"@effect/sql-mysql2": "catalog:",
 		"@voidhash/mimic": "workspace:*",
+		"@voidhash/mimic-protocol": "workspace:*",
 		"effect": "catalog:"
 	},
 	"devDependencies": {

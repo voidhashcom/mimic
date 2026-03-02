@@ -1,9 +1,11 @@
 import { Effect } from "effect";
 import { type Primitive, SchemaJSON } from "@voidhash/mimic";
-import { HttpTransport } from "./HttpTransport";
-import type { MimicSDKError } from "./errors";
+import { RpcClient } from "effect/unstable/rpc";
+import { MimicRpcs } from "@voidhash/mimic-protocol";
 import { CollectionHandle } from "./CollectionHandle";
 import type { CollectionInfo } from "./types";
+
+const makeClient = () => RpcClient.make(MimicRpcs);
 
 export class DatabaseHandle {
   readonly id: string;
@@ -16,40 +18,40 @@ export class DatabaseHandle {
     this.description = description;
   }
 
-  createCollection<TSchema extends Primitive.AnyPrimitive>(
-    name: string,
-    schema: TSchema,
-  ): Effect.Effect<CollectionHandle<TSchema>, MimicSDKError, HttpTransport> {
+  createCollection<TSchema extends Primitive.AnyPrimitive>(name: string, schema: TSchema) {
     const databaseId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const schemaJson = SchemaJSON.toJSON(schema);
-      const result = yield* transport.rpc("CreateCollection", {
-        databaseId,
-        name,
-        schemaJson,
-      });
-      const info = result as CollectionInfo;
-      return new CollectionHandle<TSchema>(info.id, info.databaseId, schema);
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const schemaJson = SchemaJSON.toJSON(schema);
+        const result = yield* client.CreateCollection({
+          databaseId,
+          name,
+          schemaJson,
+        });
+        return new CollectionHandle<TSchema>(result.id, result.databaseId, schema);
+      }),
+    );
   }
 
-  listCollections(): Effect.Effect<CollectionInfo[], MimicSDKError, HttpTransport> {
+  listCollections() {
     const databaseId = this.id;
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const result = yield* transport.rpc("ListCollections", {
-        databaseId,
-      });
-      return result as CollectionInfo[];
-    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const result = yield* client.ListCollections({ databaseId });
+        return result as unknown as CollectionInfo[];
+      }),
+    );
   }
 
-  deleteCollection(id: string): Effect.Effect<void, MimicSDKError, HttpTransport> {
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      yield* transport.rpc("DeleteCollection", { id });
-    });
+  deleteCollection(id: string) {
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        yield* client.DeleteCollection({ id });
+      }),
+    );
   }
 
   collection<TSchema extends Primitive.AnyPrimitive>(
@@ -59,17 +61,16 @@ export class DatabaseHandle {
     return new CollectionHandle<TSchema>(id, this.id, schema);
   }
 
-  updateCollectionSchema(
-    collectionId: string,
-    schemaJson: unknown,
-  ): Effect.Effect<{ id: string; schemaVersion: number }, MimicSDKError, HttpTransport> {
-    return Effect.gen(function* () {
-      const transport = yield* HttpTransport;
-      const result = yield* transport.rpc("UpdateCollectionSchema", {
-        id: collectionId,
-        schemaJson,
-      });
-      return result as { id: string; schemaVersion: number };
-    });
+  updateCollectionSchema(collectionId: string, schemaJson: unknown) {
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeClient();
+        const result = yield* client.UpdateCollectionSchema({
+          id: collectionId,
+          schemaJson,
+        });
+        return { id: result.id, schemaVersion: result.schemaVersion };
+      }),
+    );
   }
 }

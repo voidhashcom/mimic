@@ -1,5 +1,7 @@
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { RpcServer, RpcSerialization } from "effect/unstable/rpc";
+import { MimicRpcs } from "@voidhash/mimic-protocol";
 import * as TestRunner from "effect/unstable/cluster/TestRunner";
 
 import { MysqlLive } from "./mysql/MysqlLayer";
@@ -16,7 +18,8 @@ import { AuthServiceLive } from "./auth/AuthService";
 import { BootstrapLive } from "./services/BootstrapService";
 import { MimicDocumentEntityLive } from "./engine/DocumentEntity";
 import { DocumentGatewayLive } from "./engine/DocumentGateway";
-import { RpcRoute } from "./rpc/RpcRoute";
+import { RpcHandlersLive } from "./rpc/RpcHandlers";
+import { AuthMiddlewareLive } from "./rpc/AuthMiddlewareLive";
 import { WsRoute } from "./ws/WsRouter";
 
 // Health check route
@@ -58,8 +61,18 @@ const EntityLayer = MimicDocumentEntityLive;
 // Gateway layer (depends on entity client + sharding)
 const GatewayLayer = DocumentGatewayLive;
 
-// All routes
-const AllRoutes = Layer.mergeAll(HealthCheckRoute, RpcRoute, WsRoute).pipe(
+// RPC server layer
+const RpcLive = RpcServer.layerHttp({
+  group: MimicRpcs,
+  path: "/rpc",
+  protocol: "http",
+});
+
+// All routes (health check + WS + RPC via RpcServer)
+const AllRoutes = Layer.mergeAll(HealthCheckRoute, WsRoute, RpcLive).pipe(
+  Layer.provide(RpcHandlersLive),
+  Layer.provide(AuthMiddlewareLive),
+  Layer.provide(RpcSerialization.layerNdjson),
   Layer.provide(
     HttpRouter.cors({
       allowedOrigins: ["*"],

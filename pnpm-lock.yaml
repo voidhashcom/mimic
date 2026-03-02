@@ -54,6 +54,9 @@ importers:
       '@voidhash/mimic':
         specifier: workspace:*
         version: link:../../packages/mimic
+      '@voidhash/mimic-protocol':
+        specifier: workspace:*
+        version: link:../../packages/mimic-protocol
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.21
@@ -299,6 +302,19 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
 
+  packages/mimic-protocol:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21
+    devDependencies:
+      '@voidhash/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: 5.8.3
+        version: 5.8.3
+
   packages/mimic-react:
     dependencies:
       '@voidhash/mimic':
@@ -341,6 +357,9 @@ importers:
       '@voidhash/mimic':
         specifier: workspace:*
         version: link:../mimic
+      '@voidhash/mimic-protocol':
+        specifier: workspace:*
+        version: link:../mimic-protocol
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.21
