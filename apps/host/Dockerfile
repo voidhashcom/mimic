@@ -1,5 +1,5 @@
 FROM oven/bun:1 AS base
-RUN npm install -g pnpm@10.19.0
+RUN bun install -g pnpm@10.19.0
 WORKDIR /app
 
 FROM base AS deps
