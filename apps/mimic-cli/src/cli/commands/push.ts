@@ -1,10 +1,23 @@
 import { Console, Effect } from "effect";
-import { Command, Flag, Prompt } from "effect/unstable/cli";
+import { Command, Flag } from "effect/unstable/cli";
 import { RpcClient } from "effect/unstable/rpc";
 import { MimicRpcs } from "@voidhash/mimic-protocol";
 import { MimicClientLayer } from "@voidhash/mimic-sdk/effect";
 import { SchemaJSON, type Primitive } from "@voidhash/mimic";
 import { ConfigLoader } from "../../services/ConfigLoader";
+import * as readline from "node:readline";
+
+const confirm = (message: string): Effect.Effect<boolean> =>
+  Effect.callback<boolean>((resume) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(`${message} (y/N) `, (answer) => {
+      rl.close();
+      resume(Effect.succeed(answer.trim().toLowerCase() === "y"));
+    });
+  });
 
 export const pushCommand = Command.make(
   "push",
@@ -36,17 +49,29 @@ export const pushCommand = Command.make(
         Effect.gen(function* () {
           const client = yield* RpcClient.make(MimicRpcs);
 
-          // Find database by name
+          // Find database by name, or create it if it doesn't exist
           const databases = yield* client.ListDatabases(undefined as any);
-          const db = (databases as any[]).find(
+          let db = (databases as any[]).find(
             (d: any) => d.name === config.database
           );
           if (!db) {
-            return yield* Effect.fail(
-              new Error(
-                `Database "${config.database}" not found. Available databases: ${(databases as any[]).map((d: any) => d.name).join(", ") || "(none)"}`
-              )
+            yield* Console.log(
+              `Database "${config.database}" not found.`
             );
+            if (!yes) {
+              const createDb = yield* confirm(
+                `Create database "${config.database}"?`
+              );
+              if (!createDb) {
+                yield* Console.log("Aborted.");
+                return;
+              }
+            }
+            db = yield* client.CreateDatabase({
+              name: config.database,
+              description: "",
+            });
+            yield* Console.log(`Database "${config.database}" created.`);
           }
 
           // List existing collections
@@ -91,9 +116,7 @@ export const pushCommand = Command.make(
 
           // Confirm
           if (!yes) {
-            const confirmed = yield* Prompt.confirm({
-              message: "Apply these changes?",
-            });
+            const confirmed = yield* confirm("Apply these changes?");
             if (!confirmed) {
               yield* Console.log("Aborted.");
               return;

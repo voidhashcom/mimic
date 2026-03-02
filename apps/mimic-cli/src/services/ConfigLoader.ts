@@ -19,7 +19,7 @@ const MimicConfigSchema = Schema.Struct({
 });
 
 export interface ConfigLoaderShape {
-  readonly load: () => Effect.Effect<typeof MimicConfigSchema.Type>;
+  readonly load: () => Effect.Effect<typeof MimicConfigSchema.Type, Error>;
 }
 
 export class ConfigLoader extends ServiceMap.Service<ConfigLoader, ConfigLoaderShape>()(
@@ -62,11 +62,10 @@ export class ConfigLoader extends ServiceMap.Service<ConfigLoader, ConfigLoaderS
         );
 
         // Validate config shape
-        const config = yield* Schema.decodeUnknown(MimicConfigSchema)(rawConfig).pipe(
-          Effect.mapError((e) =>
-            new Error(`Invalid mimic config:\n${String(e)}`)
-          )
-        );
+        const config = yield* Effect.try({
+          try: () => Schema.decodeUnknownSync(MimicConfigSchema)(rawConfig),
+          catch: (e) => new Error(`Invalid mimic config:\n${String(e)}`),
+        });
 
         return config;
       }),

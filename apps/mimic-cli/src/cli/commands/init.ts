@@ -3,8 +3,7 @@ import { Command } from "effect/unstable/cli";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const CONFIG_TEMPLATE = `import { defineConfig, env } from "@voidhash/mimic-cli";
-import { m } from "@voidhash/mimic";
+const CONFIG_TEMPLATE = `import { defineConfig, env, m } from "@voidhash/mimic-cli";
 
 export default defineConfig({
   url: env.MIMIC_URL,
@@ -12,9 +11,9 @@ export default defineConfig({
   password: env.MIMIC_PASSWORD,
   database: "my-database",
   collections: {
-    todos: m.object({
-      title: m.string(),
-      completed: m.boolean(),
+    todos: m.Struct({
+      title: m.String(),
+      completed: m.Boolean(),
     }),
   },
 });

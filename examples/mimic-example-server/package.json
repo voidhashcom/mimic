@@ -10,6 +10,7 @@
   },
   "main": "./src/index.ts",
   "scripts": {
+    "db:push": "mimic push",
     "dev": "bun run --watch src/index.ts",
     "build": "bun build ./src/index.ts --outdir ./dist --target bun --env disable --sourcemap=external",
     "start": "bun run dist/index.js",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@voidhash/mimic-cli": "workspace:*",
     "@voidhash/tsconfig": "workspace:*",
     "typescript": "5.8.3",
     "vitest": "^3.2.4",

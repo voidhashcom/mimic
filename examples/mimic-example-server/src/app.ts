@@ -22,38 +22,47 @@ const SdkLayer = MimicClientLayer({
 });
 
 // ---------------------------------------------------------------------------
-// Provisioning — ensures db, collection, and document exist
+// Startup — looks up existing db/collection (provisioned via `mimic push`)
+// and seeds the default document if missing
 // ---------------------------------------------------------------------------
 
-const provision = Effect.gen(function* () {
-  // Ensure database exists
-  yield* Effect.log("Provision: listing databases...");
+const startup = Effect.gen(function* () {
+  // Look up database by name (must already exist)
+  yield* Effect.log("Startup: looking up database...");
   const databases = yield* MimicSDK.listDatabases();
-  yield* Effect.log(`Provision: found ${databases.length} databases`);
   const existingDb = databases.find((d) => d.name === DATABASE_NAME);
-  const dbHandle = existingDb
-    ? MimicSDK.database(existingDb.id, existingDb.name, existingDb.description)
-    : yield* MimicSDK.createDatabase({ name: DATABASE_NAME });
-  yield* Effect.log(`Provision: db=${dbHandle.id}`);
-
-  // Ensure collection exists
-  yield* Effect.log("Provision: listing collections...");
-  const collections = yield* dbHandle.listCollections();
-  yield* Effect.log(`Provision: found ${collections.length} collections`);
-  const existingCol = collections.find((c) => c.name === COLLECTION_NAME);
-
-  yield* Effect.log(
-    `Provision: ${existingCol ? "found" : "creating"} collection...`,
+  if (!existingDb) {
+    return yield* Effect.fail(
+      new Error(
+        `Database "${DATABASE_NAME}" not found. Run \`mimic push\` first to provision the schema.`,
+      ),
+    );
+  }
+  const dbHandle = MimicSDK.database(
+    existingDb.id,
+    existingDb.name,
+    existingDb.description,
   );
-  const colHandle = existingCol
-    ? dbHandle.collection(existingCol.id, MimicExampleSchema)
-    : yield* dbHandle.createCollection(COLLECTION_NAME, MimicExampleSchema);
-  yield* Effect.log(`Provision: col=${colHandle.id}`);
+  yield* Effect.log(`Startup: db=${dbHandle.id}`);
 
-  // Ensure document exists — create with default board if missing
-  yield* Effect.log("Provision: checking document...");
+  // Look up collection by name (must already exist)
+  yield* Effect.log("Startup: looking up collection...");
+  const collections = yield* dbHandle.listCollections();
+  const existingCol = collections.find((c) => c.name === COLLECTION_NAME);
+  if (!existingCol) {
+    return yield* Effect.fail(
+      new Error(
+        `Collection "${COLLECTION_NAME}" not found in database "${DATABASE_NAME}". Run \`mimic push\` first to provision the schema.`,
+      ),
+    );
+  }
+  const colHandle = dbHandle.collection(existingCol.id, MimicExampleSchema);
+  yield* Effect.log(`Startup: col=${colHandle.id}`);
+
+  // Seed default document if missing
+  yield* Effect.log("Startup: checking document...");
   yield* colHandle.get(DOCUMENT_ID).pipe(
-    Effect.tap(() => Effect.log("Provision: document exists")),
+    Effect.tap(() => Effect.log("Startup: document exists")),
     Effect.catch(() => {
       return colHandle.create(
         {
@@ -71,12 +80,12 @@ const provision = Effect.gen(function* () {
   );
 
   yield* Effect.log(
-    `Provisioned: db=${dbHandle.id} col=${colHandle.id} doc=${DOCUMENT_ID}`,
+    `Ready: db=${dbHandle.id} col=${colHandle.id} doc=${DOCUMENT_ID}`,
   );
 
   return { dbHandle, colHandle } as const;
 }).pipe(
-  Effect.tapCause((cause) => Effect.log(`Provision failed: ${cause}`)),
+  Effect.tapCause((cause) => Effect.log(`Startup failed: ${cause}`)),
   Effect.retry(
     Schedule.exponential("1 second").pipe(
       Schedule.compose(Schedule.recurs(15)),
@@ -90,8 +99,7 @@ const provision = Effect.gen(function* () {
 
 const TokenRoute = Layer.effectDiscard(
   Effect.gen(function* () {
-    // Provision on startup and cache the handles
-    const { dbHandle, colHandle } = yield* provision;
+    const { dbHandle, colHandle } = yield* startup;
 
     const router = yield* HttpRouter.HttpRouter;
     yield* router.add(

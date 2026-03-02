@@ -17,7 +17,14 @@ const workspaceSourcePlugin: esbuild.Plugin = {
       "@voidhash/mimic-sdk": "../../packages/mimic-sdk/src/index.ts",
     };
 
+    // Collect external patterns from the build options
+    const externals = new Set(build.initialOptions.external ?? []);
+
     build.onResolve({ filter: /^@voidhash\// }, (args) => {
+      // Don't resolve packages that should stay external
+      if (externals.has(args.path)) {
+        return { path: args.path, external: true };
+      }
       const mapped = workspacePackages[args.path];
       if (mapped) {
         return { path: path.resolve(__dirname, mapped) };
@@ -35,7 +42,7 @@ const main = async () => {
       "process.env.MIMIC_CLI_VERSION": `"${pkg.version}"`,
     },
     entryPoints: ["./src/cli/index.ts"],
-    external: ["esbuild"],
+    external: ["esbuild", "effect", "effect/*", "@voidhash/mimic", "@voidhash/mimic-protocol", "@voidhash/mimic-sdk", "@voidhash/mimic-sdk/*"],
     format: "cjs",
     outfile: "dist/bin.cjs",
     platform: "node",

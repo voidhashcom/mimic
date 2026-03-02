@@ -10,7 +10,7 @@ export const withErrorHandler = <A, E, R>(
     Effect.catchCause((cause) => {
       if (isDebugMode()) {
         return Console.error("\n--- Debug Trace ---").pipe(
-          Effect.andThen(Console.error(Cause.pretty(cause, { renderErrorCause: true }))),
+          Effect.andThen(Console.error(Cause.pretty(cause))),
           Effect.andThen(Console.error("--- End Debug Trace ---\n")),
           Effect.andThen(Effect.sync(() => process.exit(1)))
         );

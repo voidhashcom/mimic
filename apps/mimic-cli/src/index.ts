@@ -1,4 +1,9 @@
-import type { Primitive } from "@voidhash/mimic"
+import { Primitive } from "@voidhash/mimic"
+
+/**
+ * Shorthand alias for `Primitive` — use `m.String()`, `m.Struct({...})`, etc. in config files.
+ */
+export const m = Primitive
 
 export interface MimicConfig {
   readonly url: string

@@ -9,6 +9,9 @@ catalogs:
     '@effect/platform-bun':
       specifier: 4.0.0-beta.21
       version: 4.0.0-beta.21
+    '@effect/platform-node-shared':
+      specifier: 4.0.0-beta.21
+      version: 4.0.0-beta.21
     '@effect/sql-mysql2':
       specifier: 4.0.0-beta.21
       version: 4.0.0-beta.21
@@ -179,6 +182,9 @@ importers:
 
   apps/mimic-cli:
     dependencies:
+      '@effect/platform-node-shared':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21(effect@4.0.0-beta.21)
       '@voidhash/mimic':
         specifier: workspace:*
         version: link:../../packages/mimic
@@ -317,6 +323,9 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.21(effect@4.0.0-beta.21)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      '@voidhash/mimic-cli':
+        specifier: workspace:*
+        version: link:../../apps/mimic-cli
       '@voidhash/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig

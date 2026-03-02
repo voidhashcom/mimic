@@ -9,11 +9,11 @@
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/index.d.mts",
+        "types": "./src/index.ts",
         "default": "./dist/index.mjs"
       },
       "require": {
-        "types": "./dist/index.d.ts",
+        "types": "./src/index.ts",
         "default": "./dist/index.js"
       }
     }
@@ -27,6 +27,7 @@
     "@voidhash/mimic-protocol": "workspace:*",
     "@voidhash/mimic-sdk": "workspace:*",
     "dotenv": "^16.4.7",
+    "@effect/platform-node-shared": "catalog:",
     "effect": "catalog:",
     "esbuild-register": "^3.6.0"
   },
