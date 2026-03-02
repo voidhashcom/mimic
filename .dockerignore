@@ -1,0 +1,10 @@
+node_modules
+.git
+.github
+.claude
+*.md
+!pnpm-workspace.yaml
+dist
+.turbo
+.env
+.env.*

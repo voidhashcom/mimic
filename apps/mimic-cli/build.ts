@@ -11,10 +11,10 @@ const workspaceSourcePlugin: esbuild.Plugin = {
   name: "workspace-source",
   setup(build) {
     const workspacePackages: Record<string, string> = {
-      "@voidhash/mimic": "../mimic/src/index.ts",
-      "@voidhash/mimic-protocol": "../mimic-protocol/src/index.ts",
-      "@voidhash/mimic-sdk/effect": "../mimic-sdk/src/effect/index.ts",
-      "@voidhash/mimic-sdk": "../mimic-sdk/src/index.ts",
+      "@voidhash/mimic": "../../packages/mimic/src/index.ts",
+      "@voidhash/mimic-protocol": "../../packages/mimic-protocol/src/index.ts",
+      "@voidhash/mimic-sdk/effect": "../../packages/mimic-sdk/src/effect/index.ts",
+      "@voidhash/mimic-sdk": "../../packages/mimic-sdk/src/index.ts",
     };
 
     build.onResolve({ filter: /^@voidhash\// }, (args) => {

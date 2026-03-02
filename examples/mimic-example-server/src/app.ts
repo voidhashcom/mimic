@@ -114,11 +114,17 @@ const TokenRoute = Layer.effectDiscard(
   }),
 );
 
+const corsAllowedOrigins = (): ReadonlyArray<string> => {
+  const env = process.env.CORS_ORIGINS?.trim();
+  if (!env) return ["http://localhost:5173"];
+  return env.split(",").map((o) => o.trim());
+};
+
 const AllRoutes = Layer.mergeAll(TokenRoute).pipe(
   Layer.provide(SdkLayer),
   Layer.provide(
     HttpRouter.cors({
-      allowedOrigins: ["http://localhost:5173"],
+      allowedOrigins: corsAllowedOrigins(),
       credentials: true,
     }),
   ),

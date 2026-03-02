@@ -30,10 +30,9 @@ import { WsRoute } from "./ws/WsRouter";
  *
  * Defaults to `http://localhost:5173` for local development.
  */
-const corsAllowedOrigins = (): ReadonlyArray<string> | ((origin: string) => boolean) => {
+const corsAllowedOrigins = (): ReadonlyArray<string> => {
   const env = process.env.CORS_ORIGINS?.trim();
   if (!env) return ["http://localhost:5173", "http://localhost:3003"];
-  if (env === "*") return () => true;
   return env.split(",").map((o) => o.trim());
 };
 
