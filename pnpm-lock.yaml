@@ -9,6 +9,9 @@ catalogs:
     '@effect/platform-bun':
       specifier: 4.0.0-beta.21
       version: 4.0.0-beta.21
+    '@effect/sql-mysql2':
+      specifier: 4.0.0-beta.21
+      version: 4.0.0-beta.21
     '@effect/vitest':
       specifier: 4.0.0-beta.21
       version: 4.0.0-beta.21
@@ -45,12 +48,15 @@ importers:
       '@effect/platform-bun':
         specifier: 'catalog:'
         version: 4.0.0-beta.21(effect@4.0.0-beta.21)
+      '@effect/sql-mysql2':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21(@types/node@25.0.3)(effect@4.0.0-beta.21)
       '@voidhash/mimic':
         specifier: workspace:*
         version: link:../../packages/mimic
-      '@voidhash/mimic-effect':
+      '@voidhash/mimic-protocol':
         specifier: workspace:*
-        version: link:../../packages/mimic-effect
+        version: link:../../packages/mimic-protocol
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.21
@@ -73,9 +79,6 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
-      '@effect/platform-bun':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.21(effect@4.0.0-beta.21)
       '@tailwindcss/postcss':
         specifier: ^4.1.15
         version: 4.1.18
@@ -155,49 +158,12 @@ importers:
       '@effect/platform-bun':
         specifier: 'catalog:'
         version: 4.0.0-beta.21(effect@4.0.0-beta.21)
-      '@voidhash/mimic':
-        specifier: workspace:*
-        version: link:../../packages/mimic
-      '@voidhash/mimic-effect':
-        specifier: workspace:*
-        version: link:../../packages/mimic-effect
       '@voidhash/mimic-example-shared':
         specifier: workspace:*
         version: link:../mimic-example-shared
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.21
-    devDependencies:
-      '@effect/vitest':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.21(effect@4.0.0-beta.21)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
-      '@voidhash/tsconfig':
+      '@voidhash/mimic-sdk':
         specifier: workspace:*
-        version: link:../../packages/tsconfig
-      typescript:
-        specifier: 5.8.3
-        version: 5.8.3
-      vite-tsconfig-paths:
-        specifier: ^5.1.4
-        version: 5.1.4(typescript@5.8.3)(vite@7.3.0(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
-
-  examples/mimic-example-server-cluster:
-    dependencies:
-      '@effect/platform-bun':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.21(effect@4.0.0-beta.21)
-      '@voidhash/mimic':
-        specifier: workspace:*
-        version: link:../../packages/mimic
-      '@voidhash/mimic-effect':
-        specifier: workspace:*
-        version: link:../../packages/mimic-effect
-      '@voidhash/mimic-example-shared':
-        specifier: workspace:*
-        version: link:../mimic-example-shared
+        version: link:../../packages/mimic-sdk
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.21
@@ -296,6 +262,19 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
 
+  packages/mimic-protocol:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21
+    devDependencies:
+      '@voidhash/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: 5.8.3
+        version: 5.8.3
+
   packages/mimic-react:
     dependencies:
       '@voidhash/mimic':
@@ -332,6 +311,28 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
+
+  packages/mimic-sdk:
+    dependencies:
+      '@voidhash/mimic':
+        specifier: workspace:*
+        version: link:../mimic
+      '@voidhash/mimic-protocol':
+        specifier: workspace:*
+        version: link:../mimic-protocol
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21
+    devDependencies:
+      '@voidhash/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      tsdown:
+        specifier: ^0.18.2
+        version: 0.18.2(@typescript/native-preview@7.0.0-dev.20260210.1)(typescript@5.8.3)
+      typescript:
+        specifier: 5.8.3
+        version: 5.8.3
 
   packages/tsconfig: {}
 
@@ -571,6 +572,11 @@ packages:
   '@effect/platform-node-shared@4.0.0-beta.21':
     resolution: {integrity: sha512-nPjV/F0aJdJVc92jIMsCxXLd8AcFnK249vhvVf8bwf8PA5oFsS+Kv3P8zqGiUVyuigTUHh3Dx1cVsl8VQ0XXQw==}
     engines: {node: '>=18.0.0'}
+    peerDependencies:
+      effect: ^4.0.0-beta.21
+
+  '@effect/sql-mysql2@4.0.0-beta.21':
+    resolution: {integrity: sha512-Rg6pn0PJX/0DypiXIR78JyRRY3tDGqFUUWMexxZqRJyHieAJe7gGLrmVQ3RMvdYIldwAieOPPQX8mrAP9Sl7hA==}
     peerDependencies:
       effect: ^4.0.0-beta.21
 
@@ -1315,6 +1321,10 @@ packages:
     resolution: {integrity: sha512-6t10qk83GOG8p0vKmaCr8eiilZwO171AvbROMtvvNiwrTly62t+7XkA8RdIIVbpMhCASAsxgAzdRSwh6nw/5Dg==}
     engines: {node: '>=4'}
 
+  aws-ssl-profiles@1.1.2:
+    resolution: {integrity: sha512-NZKeq9AfyQvEeNlN0zSYAaWrmBffJh3IELMZfRpJVWgrpEbtEpnjvzqBPf+mxoI287JohRDoa+/nsfqqiZmF6g==}
+    engines: {node: '>= 6.0.0'}
+
   babel-dead-code-elimination@1.0.11:
     resolution: {integrity: sha512-mwq3W3e/pKSI6TG8lXMiDWvEi1VXYlSBlJlB3l+I0bAb5u1RNUl88udos85eOPNK3m5EXK9uO7d2g08pesTySQ==}
 
@@ -1407,6 +1417,10 @@ packages:
   defu@6.1.4:
     resolution: {integrity: sha512-mEQCMmwJu317oSz8CwdIOdwf3xMif1ttiM8LTufzc3g6kR+9Pe236twL8j3IYT1F7GfRgGcW6MWxzZjLIkuHIg==}
 
+  denque@2.1.0:
+    resolution: {integrity: sha512-HVQE3AAb/pxF8fQAoiqpvg9i3evqug3hoiwakOyZAwJm+6vZehbkYXZ0l4JxS+I3QxM97v5aaRNhj8v5oBhekw==}
+    engines: {node: '>=0.10'}
+
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -1497,6 +1511,9 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  generate-function@2.3.1:
+    resolution: {integrity: sha512-eeB5GfMNeevm/GRYq20ShmsaGcmI81kIX2K9XQx5miC8KdHaC6Jm0qQ8ZNeGOi7wYB8OsdxKs+Y2oVuTFuVwKQ==}
+
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
@@ -1522,6 +1539,10 @@ packages:
   hookable@6.0.1:
     resolution: {integrity: sha512-uKGyY8BuzN/a5gvzvA+3FVWo0+wUjgtfSdnmjtrOVwQCZPHpHDH2WRO3VZSOeluYrHoDCiXFffZXs8Dj1ULWtw==}
 
+  iconv-lite@0.7.2:
+    resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
+    engines: {node: '>=0.10.0'}
+
   import-without-cache@0.2.5:
     resolution: {integrity: sha512-B6Lc2s6yApwnD2/pMzFh/d5AVjdsDXjgkeJ766FmFuJELIGHNycKRj+l3A39yZPM4CchqNCB4RITEAYB1KUM6A==}
     engines: {node: '>=20.19.0'}
@@ -1545,6 +1566,9 @@ packages:
   is-number@7.0.0:
     resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
     engines: {node: '>=0.12.0'}
+
+  is-property@1.0.2:
+    resolution: {integrity: sha512-Ks/IoX00TtClbGQr4TWXemAnktAQvYB7HzcCxDGqEZU6oCmb2INHuOoKxbtR+HFkmYWBKv/dOZtGRiAjDhj92g==}
 
   isbot@5.1.32:
     resolution: {integrity: sha512-VNfjM73zz2IBZmdShMfAUg10prm6t7HFUQmNAEOAVS4YH92ZrZcvkMcGX6cIgBJAzWDzPent/EeAtYEHNPNPBQ==}
@@ -1646,11 +1670,18 @@ packages:
     resolution: {integrity: sha512-utfs7Pr5uJyyvDETitgsaqSyjCb2qNRAtuqUeWIAKztsOYdcACf2KtARYXg2pSvhkt+9NfoaNY7fxjl6nuMjIQ==}
     engines: {node: '>= 12.0.0'}
 
+  long@5.3.2:
+    resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
+
   loupe@3.2.1:
     resolution: {integrity: sha512-CdzqowRJCeLU72bHvWqwRBBlLcMEtIvGrlvef74kMnV2AolS9Y8xUv1I0U/MNAWMhBlKIoyuEgoJ0t/bbwHbLQ==}
 
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
+
+  lru.min@1.1.4:
+    resolution: {integrity: sha512-DqC6n3QQ77zdFpCMASA1a3Jlb64Hv2N2DciFGkO/4L9+q/IpIAuRlKOvCXabtRW6cQf8usbmM6BE/TOPysCdIA==}
+    engines: {bun: '>=1.0.0', deno: '>=1.30.0', node: '>=8.0.0'}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -1667,6 +1698,16 @@ packages:
 
   multipasta@0.2.7:
     resolution: {integrity: sha512-KPA58d68KgGil15oDqXjkUBEBYc00XvbPj5/X+dyzeo/lWm9Nc25pQRlf1D+gv4OpK7NM0J1odrbu9JNNGvynA==}
+
+  mysql2@3.18.2:
+    resolution: {integrity: sha512-UfEShBFAZZEAKjySnTUuE7BgqkYT4mx+RjoJ5aqtmwSSvNcJ/QxQPXz/y3jSxNiVRedPfgccmuBtiPCSiEEytw==}
+    engines: {node: '>= 8.0'}
+    peerDependencies:
+      '@types/node': '>= 8'
+
+  named-placeholders@1.1.6:
+    resolution: {integrity: sha512-Tz09sEL2EEuv5fFowm419c1+a/jSMiBjI9gHxVLrVdbUkkNUUfjsVYs9pVZu5oCon/kmRh9TfLEObFtkVxmY0w==}
+    engines: {node: '>=8.0.0'}
 
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
@@ -1787,6 +1828,9 @@ packages:
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
 
+  safer-buffer@2.1.2:
+    resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
+
   scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
@@ -1839,6 +1883,10 @@ packages:
   source-map@0.7.6:
     resolution: {integrity: sha512-i5uvt8C3ikiWeNZSVZNWcfZPItFQOsYTUAOkcUPGd8DqDy1uOUikjt5dG+uRlwyvR108Fb9DOd4GvXfT0N2/uQ==}
     engines: {node: '>= 12'}
+
+  sql-escaper@1.3.3:
+    resolution: {integrity: sha512-BsTCV265VpTp8tm1wyIm1xqQCS+Q9NHx2Sr+WcnUrgLrQ6yiDIvHYJV5gHxsj1lMBy2zm5twLaZao8Jd+S8JJw==}
+    engines: {bun: '>=1.0.0', deno: '>=2.0.0', node: '>=12.0.0'}
 
   stackback@0.0.2:
     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
@@ -2466,6 +2514,13 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
+  '@effect/sql-mysql2@4.0.0-beta.21(@types/node@25.0.3)(effect@4.0.0-beta.21)':
+    dependencies:
+      effect: 4.0.0-beta.21
+      mysql2: 3.18.2(@types/node@25.0.3)
+    transitivePeerDependencies:
+      - '@types/node'
+
   '@effect/vitest@0.26.0(effect@3.19.13)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
       effect: 3.19.13
@@ -3070,6 +3125,8 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
+  aws-ssl-profiles@1.1.2: {}
+
   babel-dead-code-elimination@1.0.11:
     dependencies:
       '@babel/core': 7.28.5
@@ -3154,6 +3211,8 @@ snapshots:
   deepmerge@4.3.1: {}
 
   defu@6.1.4: {}
+
+  denque@2.1.0: {}
 
   detect-libc@2.1.2: {}
 
@@ -3252,6 +3311,10 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
+  generate-function@2.3.1:
+    dependencies:
+      is-property: 1.0.2
+
   gensync@1.0.0-beta.2: {}
 
   get-tsconfig@4.13.0:
@@ -3272,6 +3335,10 @@ snapshots:
 
   hookable@6.0.1: {}
 
+  iconv-lite@0.7.2:
+    dependencies:
+      safer-buffer: 2.1.2
+
   import-without-cache@0.2.5: {}
 
   ini@6.0.0: {}
@@ -3287,6 +3354,8 @@ snapshots:
       is-extglob: 2.1.1
 
   is-number@7.0.0: {}
+
+  is-property@1.0.2: {}
 
   isbot@5.1.32: {}
 
@@ -3353,11 +3422,15 @@ snapshots:
       lightningcss-win32-arm64-msvc: 1.30.2
       lightningcss-win32-x64-msvc: 1.30.2
 
+  long@5.3.2: {}
+
   loupe@3.2.1: {}
 
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
+
+  lru.min@1.1.4: {}
 
   magic-string@0.30.21:
     dependencies:
@@ -3382,6 +3455,22 @@ snapshots:
       msgpackr-extract: 3.0.3
 
   multipasta@0.2.7: {}
+
+  mysql2@3.18.2(@types/node@25.0.3):
+    dependencies:
+      '@types/node': 25.0.3
+      aws-ssl-profiles: 1.1.2
+      denque: 2.1.0
+      generate-function: 2.3.1
+      iconv-lite: 0.7.2
+      long: 5.3.2
+      lru.min: 1.1.4
+      named-placeholders: 1.1.6
+      sql-escaper: 1.3.3
+
+  named-placeholders@1.1.6:
+    dependencies:
+      lru.min: 1.1.4
 
   nanoid@3.3.11: {}
 
@@ -3523,6 +3612,8 @@ snapshots:
       '@rollup/rollup-win32-x64-msvc': 4.54.0
       fsevents: 2.3.3
 
+  safer-buffer@2.1.2: {}
+
   scheduler@0.27.0: {}
 
   semver@6.3.1: {}
@@ -3556,6 +3647,8 @@ snapshots:
   source-map@0.6.1: {}
 
   source-map@0.7.6: {}
+
+  sql-escaper@1.3.3: {}
 
   stackback@0.0.2: {}
 

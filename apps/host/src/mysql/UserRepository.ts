@@ -38,46 +38,46 @@ export const UserRepositoryLive: Layer.Layer<UserRepositoryTag, never, SqlClient
 
     return {
       create: (id, username, passwordHash, isSuperuser) =>
-        sql`INSERT INTO mimic_users (id, username, password_hash, is_superuser) VALUES (${id}, ${username}, ${passwordHash}, ${isSuperuser})`.pipe(
+        sql`INSERT INTO users (id, username, password_hash, is_superuser) VALUES (${id}, ${username}, ${passwordHash}, ${isSuperuser})`.pipe(
           Effect.asVoid,
         ),
 
       findById: (id) =>
-        sql<User>`SELECT id, username, password_hash AS "passwordHash", is_superuser AS "isSuperuser", created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_users WHERE id = ${id}`.pipe(
+        sql<User>`SELECT id, username, password_hash AS "passwordHash", is_superuser AS "isSuperuser", created_at AS "createdAt", updated_at AS "updatedAt" FROM users WHERE id = ${id}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       findByUsername: (username) =>
-        sql<User>`SELECT id, username, password_hash AS "passwordHash", is_superuser AS "isSuperuser", created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_users WHERE username = ${username}`.pipe(
+        sql<User>`SELECT id, username, password_hash AS "passwordHash", is_superuser AS "isSuperuser", created_at AS "createdAt", updated_at AS "updatedAt" FROM users WHERE username = ${username}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       list: () =>
-        sql<User>`SELECT id, username, password_hash AS "passwordHash", is_superuser AS "isSuperuser", created_at AS "createdAt", updated_at AS "updatedAt" FROM mimic_users ORDER BY created_at DESC`,
+        sql<User>`SELECT id, username, password_hash AS "passwordHash", is_superuser AS "isSuperuser", created_at AS "createdAt", updated_at AS "updatedAt" FROM users ORDER BY created_at DESC`,
 
-      remove: (id) => sql`DELETE FROM mimic_users WHERE id = ${id}`.pipe(Effect.asVoid),
+      remove: (id) => sql`DELETE FROM users WHERE id = ${id}`.pipe(Effect.asVoid),
 
       updatePasswordHash: (id, passwordHash) =>
-        sql`UPDATE mimic_users SET password_hash = ${passwordHash} WHERE id = ${id}`.pipe(Effect.asVoid),
+        sql`UPDATE users SET password_hash = ${passwordHash} WHERE id = ${id}`.pipe(Effect.asVoid),
 
       createGrant: (id, userId, databaseId, permission) =>
-        sql`INSERT INTO mimic_user_grants (id, user_id, database_id, permission) VALUES (${id}, ${userId}, ${databaseId}, ${permission}) ON DUPLICATE KEY UPDATE permission = ${permission}`.pipe(
+        sql`INSERT INTO user_grants (id, user_id, database_id, permission) VALUES (${id}, ${userId}, ${databaseId}, ${permission}) ON DUPLICATE KEY UPDATE permission = ${permission}`.pipe(
           Effect.asVoid,
         ),
 
       findGrant: (userId, databaseId) =>
-        sql<UserGrant>`SELECT id, user_id AS "userId", database_id AS "databaseId", permission, created_at AS "createdAt" FROM mimic_user_grants WHERE user_id = ${userId} AND database_id = ${databaseId}`.pipe(
+        sql<UserGrant>`SELECT id, user_id AS "userId", database_id AS "databaseId", permission, created_at AS "createdAt" FROM user_grants WHERE user_id = ${userId} AND database_id = ${databaseId}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       listGrantsByUser: (userId) =>
-        sql<UserGrant>`SELECT id, user_id AS "userId", database_id AS "databaseId", permission, created_at AS "createdAt" FROM mimic_user_grants WHERE user_id = ${userId}`,
+        sql<UserGrant>`SELECT id, user_id AS "userId", database_id AS "databaseId", permission, created_at AS "createdAt" FROM user_grants WHERE user_id = ${userId}`,
 
       listGrants: () =>
-        sql<UserGrant>`SELECT id, user_id AS "userId", database_id AS "databaseId", permission, created_at AS "createdAt" FROM mimic_user_grants`,
+        sql<UserGrant>`SELECT id, user_id AS "userId", database_id AS "databaseId", permission, created_at AS "createdAt" FROM user_grants`,
 
       removeGrant: (userId, databaseId) =>
-        sql`DELETE FROM mimic_user_grants WHERE user_id = ${userId} AND database_id = ${databaseId}`.pipe(Effect.asVoid),
+        sql`DELETE FROM user_grants WHERE user_id = ${userId} AND database_id = ${databaseId}`.pipe(Effect.asVoid),
     };
   }),
 );

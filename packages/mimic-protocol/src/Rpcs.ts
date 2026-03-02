@@ -7,12 +7,12 @@ import { AuthMiddleware } from "./middleware.js";
 export const CreateDatabase = Rpc.make("CreateDatabase", {
   payload: {
     name: Schema.String,
-    description: Schema.String,
+    description: Schema.optional(Schema.String),
   },
   success: Schema.Struct({
     id: Schema.String,
     name: Schema.String,
-    description: Schema.String,
+    description: Schema.NullOr(Schema.String),
   }),
   error: Schema.String,
 });
@@ -22,7 +22,7 @@ export const ListDatabases = Rpc.make("ListDatabases", {
     Schema.Struct({
       id: Schema.String,
       name: Schema.String,
-      description: Schema.String,
+      description: Schema.NullOr(Schema.String),
     }),
   ),
   error: Schema.String,
@@ -40,7 +40,7 @@ export const CreateCollection = Rpc.make("CreateCollection", {
   payload: {
     databaseId: Schema.String,
     name: Schema.String,
-    schemaJson: Schema.Any,
+    schemaJson: Schema.Unknown,
   },
   success: Schema.Struct({
     id: Schema.String,
@@ -65,7 +65,7 @@ export const ListCollections = Rpc.make("ListCollections", {
 export const UpdateCollectionSchema = Rpc.make("UpdateCollectionSchema", {
   payload: {
     id: Schema.String,
-    schemaJson: Schema.Any,
+    schemaJson: Schema.Unknown,
   },
   success: Schema.Struct({
     id: Schema.String,
@@ -165,7 +165,7 @@ export const CreateDocumentToken = Rpc.make("CreateDocumentToken", {
 const DocumentSnapshotSchema = Schema.Struct({
   id: Schema.String,
   collectionId: Schema.String,
-  state: Schema.Any,
+  state: Schema.Unknown,
   version: Schema.Number,
 });
 
@@ -173,7 +173,7 @@ export const CreateDocument = Rpc.make("CreateDocument", {
   payload: {
     collectionId: Schema.String,
     id: Schema.optional(Schema.String),
-    data: Schema.Any,
+    data: Schema.Unknown,
   },
   success: DocumentSnapshotSchema,
   error: Schema.String,
@@ -192,7 +192,7 @@ export const UpdateDocument = Rpc.make("UpdateDocument", {
   payload: {
     collectionId: Schema.String,
     documentId: Schema.String,
-    data: Schema.Any,
+    data: Schema.Unknown,
   },
   success: Schema.Struct({
     id: Schema.String,
@@ -205,7 +205,7 @@ export const SetDocument = Rpc.make("SetDocument", {
   payload: {
     collectionId: Schema.String,
     documentId: Schema.String,
-    data: Schema.Any,
+    data: Schema.Unknown,
   },
   success: Schema.Struct({
     id: Schema.String,

@@ -8,10 +8,10 @@ const MysqlClientLive = MysqlClient.layerConfig(
   Config.all({
     host: Config.string("DATABASE_HOST").pipe(Config.withDefault("localhost")),
     port: Config.number("DATABASE_PORT").pipe(Config.withDefault(3306)),
-    database: Config.string("DATABASE_NAME").pipe(Config.withDefault("voidsync")),
+    database: Config.string("DATABASE_NAME").pipe(Config.withDefault("mimic")),
     username: Config.string("DATABASE_USERNAME").pipe(Config.withDefault("root")),
     password: Config.redacted("DATABASE_PASSWORD").pipe(
-      Config.withDefault(Redacted.make("root_password")),
+      Config.withDefault(Redacted.make("")),
     ),
   }),
 );

@@ -50,44 +50,44 @@ export const DocumentRepositoryLive: Layer.Layer<DocumentRepositoryTag, never, S
 
     return {
       create: (id, collectionId) =>
-        sql`INSERT INTO mimic_documents (id, collection_id) VALUES (${id}, ${collectionId})`.pipe(
+        sql`INSERT INTO documents (id, collection_id) VALUES (${id}, ${collectionId})`.pipe(
           Effect.asVoid,
         ),
 
       findById: (id) =>
-        sql<DocumentMeta>`SELECT id, collection_id AS "collectionId", created_at AS "createdAt", deleted_at AS "deletedAt" FROM mimic_documents WHERE id = ${id}`.pipe(
+        sql<DocumentMeta>`SELECT id, collection_id AS "collectionId", created_at AS "createdAt", deleted_at AS "deletedAt" FROM documents WHERE id = ${id}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       listByCollection: (collectionId) =>
-        sql<DocumentMeta>`SELECT id, collection_id AS "collectionId", created_at AS "createdAt", deleted_at AS "deletedAt" FROM mimic_documents WHERE collection_id = ${collectionId} AND deleted_at IS NULL ORDER BY created_at DESC`,
+        sql<DocumentMeta>`SELECT id, collection_id AS "collectionId", created_at AS "createdAt", deleted_at AS "deletedAt" FROM documents WHERE collection_id = ${collectionId} AND deleted_at IS NULL ORDER BY created_at DESC`,
 
       softDelete: (id) =>
-        sql`UPDATE mimic_documents SET deleted_at = NOW() WHERE id = ${id}`.pipe(Effect.asVoid),
+        sql`UPDATE documents SET deleted_at = NOW() WHERE id = ${id}`.pipe(Effect.asVoid),
 
       loadSnapshot: (documentId) =>
-        sql<StoredSnapshot>`SELECT document_id AS "documentId", state_json AS "stateJson", version, schema_version AS "schemaVersion", saved_at AS "savedAt" FROM mimic_document_snapshots WHERE document_id = ${documentId}`.pipe(
+        sql<StoredSnapshot>`SELECT document_id AS "documentId", state_json AS "stateJson", version, schema_version AS "schemaVersion", saved_at AS "savedAt" FROM document_snapshots WHERE document_id = ${documentId}`.pipe(
           Effect.map((rows) => rows[0]),
         ),
 
       saveSnapshot: (documentId, stateJson, version, schemaVersion) =>
-        sql`INSERT INTO mimic_document_snapshots (document_id, state_json, version, schema_version) VALUES (${documentId}, ${JSON.stringify(stateJson)}, ${version}, ${schemaVersion}) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), version = VALUES(version), schema_version = VALUES(schema_version), saved_at = NOW()`.pipe(
+        sql`INSERT INTO document_snapshots (document_id, state_json, version, schema_version) VALUES (${documentId}, ${JSON.stringify(stateJson)}, ${version}, ${schemaVersion}) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), version = VALUES(version), schema_version = VALUES(schema_version), saved_at = NOW()`.pipe(
           Effect.asVoid,
         ),
 
       deleteSnapshot: (documentId) =>
-        sql`DELETE FROM mimic_document_snapshots WHERE document_id = ${documentId}`.pipe(Effect.asVoid),
+        sql`DELETE FROM document_snapshots WHERE document_id = ${documentId}`.pipe(Effect.asVoid),
 
       appendWal: (documentId, version, transactionJson, timestamp) =>
-        sql`INSERT INTO mimic_document_wal (document_id, version, transaction_json, timestamp) VALUES (${documentId}, ${version}, ${JSON.stringify(transactionJson)}, ${timestamp})`.pipe(
+        sql`INSERT INTO document_wal (document_id, version, transaction_json, timestamp) VALUES (${documentId}, ${version}, ${JSON.stringify(transactionJson)}, ${timestamp})`.pipe(
           Effect.asVoid,
         ),
 
       getWalEntries: (documentId, sinceVersion) =>
-        sql<StoredWalEntry>`SELECT id, document_id AS "documentId", version, transaction_json AS "transactionJson", timestamp FROM mimic_document_wal WHERE document_id = ${documentId} AND version > ${sinceVersion} ORDER BY version ASC`,
+        sql<StoredWalEntry>`SELECT id, document_id AS "documentId", version, transaction_json AS "transactionJson", timestamp FROM document_wal WHERE document_id = ${documentId} AND version > ${sinceVersion} ORDER BY version ASC`,
 
       truncateWal: (documentId, upToVersion) =>
-        sql`DELETE FROM mimic_document_wal WHERE document_id = ${documentId} AND version <= ${upToVersion}`.pipe(
+        sql`DELETE FROM document_wal WHERE document_id = ${documentId} AND version <= ${upToVersion}`.pipe(
           Effect.asVoid,
         ),
     };

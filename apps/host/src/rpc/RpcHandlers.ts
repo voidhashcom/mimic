@@ -98,7 +98,7 @@ export const RpcHandlersLive = MimicRpcs.toLayer(
           const db = yield* dbService.create(payload.name, payload.description).pipe(
             Effect.mapError(mapServiceError),
           );
-          return { id: db.id, name: db.name, description: db.description ?? "" };
+          return { id: db.id, name: db.name, description: db.description };
         }),
 
       ListDatabases: () =>
@@ -106,7 +106,7 @@ export const RpcHandlersLive = MimicRpcs.toLayer(
           const user = yield* CurrentUser;
           yield* requireSuperuser(user, "ListDatabases");
           const dbs = yield* dbService.list().pipe(Effect.mapError(mapServiceError));
-          return dbs.map((db) => ({ id: db.id, name: db.name, description: db.description ?? "" }));
+          return dbs.map((db) => ({ id: db.id, name: db.name, description: db.description }));
         }),
 
       DeleteDatabase: (payload) =>

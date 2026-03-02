@@ -10,9 +10,9 @@ const makeClient = () => RpcClient.make(MimicRpcs);
 export class DatabaseHandle {
   readonly id: string;
   readonly name: string;
-  readonly description: string;
+  readonly description: string | null;
 
-  constructor(id: string, name: string, description: string) {
+  constructor(id: string, name: string, description: string | null) {
     this.id = id;
     this.name = name;
     this.description = description;

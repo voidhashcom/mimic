@@ -31,7 +31,7 @@ export class MimicSDK {
     return this._runtime.runPromise(EffectMimicSDK.deleteDatabase(id)) as Promise<void>;
   }
 
-  database(id: string, name = "", description = ""): DatabaseHandle {
+  database(id: string, name = "", description: string | null = null): DatabaseHandle {
     return new DatabaseHandle(id, name, description, this._runtime);
   }
 
