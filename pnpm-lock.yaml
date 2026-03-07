@@ -440,8 +440,8 @@ importers:
         version: 5.0.9(@types/react@19.2.7)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
       '@effect/vitest':
-        specifier: ^0.26.0
-        version: 0.26.0(effect@3.19.13)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21(effect@4.0.0-beta.21)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.7
@@ -449,8 +449,8 @@ importers:
         specifier: workspace:*
         version: link:../tsconfig
       effect:
-        specifier: ^3.16.0
-        version: 3.19.13
+        specifier: 'catalog:'
+        version: 4.0.0-beta.21
       react:
         specifier: ^19.0.0
         version: 19.2.3
@@ -734,12 +734,6 @@ packages:
     resolution: {integrity: sha512-Rg6pn0PJX/0DypiXIR78JyRRY3tDGqFUUWMexxZqRJyHieAJe7gGLrmVQ3RMvdYIldwAieOPPQX8mrAP9Sl7hA==}
     peerDependencies:
       effect: ^4.0.0-beta.21
-
-  '@effect/vitest@0.26.0':
-    resolution: {integrity: sha512-h7r21XRtHpl8CQmIuplCK54bYJkUij4c6bUxK27y4d9dTXn4s7c/I3Lilb4VZxv3P3S3sChCu5YIGW4pdQFjZg==}
-    peerDependencies:
-      effect: ^3.18.0
-      vitest: ^3.2.0
 
   '@effect/vitest@4.0.0-beta.21':
     resolution: {integrity: sha512-Q+tvV1MBfPo9//uQXEnl4u+1mF8l+pHlOg3wbXGoxiJBRwbmL23TruIVXzhh1zlUo106ppDau+216RJ/yaRbnA==}
@@ -3960,11 +3954,6 @@ snapshots:
       mysql2: 3.18.2(@types/node@25.0.3)
     transitivePeerDependencies:
       - '@types/node'
-
-  '@effect/vitest@0.26.0(effect@3.19.13)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))':
-    dependencies:
-      effect: 3.19.13
-      vitest: 3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
 
   '@effect/vitest@4.0.0-beta.21(effect@4.0.0-beta.21)(vitest@3.2.4(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
