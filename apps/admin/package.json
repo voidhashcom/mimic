@@ -1,6 +1,6 @@
 {
   "name": "@voidhash/mimic-admin",
-  "version": "1.0.0-beta.18",
+  "version": "1.0.0-beta.19",
   "type": "module",
   "bin": {
     "mimic-admin": "./bin/cli.js"
