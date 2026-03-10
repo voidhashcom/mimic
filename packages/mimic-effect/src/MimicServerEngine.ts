@@ -20,6 +20,9 @@ import {
 } from "effect";
 import type { Primitive, Transaction } from "@voidhash/mimic";
 import type {
+  DocumentInfo,
+  DocumentHotStorageStats,
+  EngineOverview,
   MimicServerEngineConfig,
   PresenceEntry,
   PresenceEvent,
@@ -137,6 +140,38 @@ export interface MimicServerEngine {
   readonly subscribePresence: (
     documentId: string
   ) => Effect.Effect<Stream.Stream<PresenceEvent, never, never>, never, Scope.Scope>;
+
+  // ===========================================================================
+  // Observability
+  // ===========================================================================
+
+  /**
+   * Get information about all currently open (in-memory) documents.
+   * Returns version, activity times, and snapshot tracking for each document.
+   */
+  readonly getOpenDocuments: () => Effect.Effect<DocumentInfo[]>;
+
+  /**
+   * Get information about a specific document if it is currently open.
+   * Returns undefined if the document is not loaded in memory.
+   */
+  readonly getDocumentInfo: (
+    documentId: string
+  ) => Effect.Effect<DocumentInfo | undefined>;
+
+  /**
+   * Get hot storage (WAL) statistics for a document.
+   * Queries the write-ahead log for entry count and timestamps.
+   */
+  readonly getHotStorageStats: (
+    documentId: string
+  ) => Effect.Effect<DocumentHotStorageStats, MimicServerEngineError>;
+
+  /**
+   * Get a high-level overview of the engine's current state.
+   * Includes active document count and per-document information.
+   */
+  readonly getOverview: () => Effect.Effect<EngineOverview>;
 
   /**
    * Resolved engine configuration.
@@ -415,6 +450,24 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
         })()
       );
 
+      /**
+       * Build DocumentInfo from a store entry
+       */
+      const buildDocumentInfo = (
+        documentId: string,
+        entry: StoreEntry<TSchema>
+      ) =>
+        Effect.gen(function* () {
+          const tracking = yield* entry.instance.getSnapshotTracking;
+          const lastActivityTime = yield* entry.instance.getLastActivityTime();
+          return {
+            documentId,
+            version: entry.instance.getVersion(),
+            lastActivityTime,
+            ...tracking,
+          } satisfies DocumentInfo;
+        });
+
       const engine: MimicServerEngine = {
         submit: (documentId, transaction) =>
           Effect.gen(function* () {
@@ -464,6 +517,58 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
         subscribePresence: (documentId) =>
           presenceManager.subscribe(documentId),
+
+        // =====================================================================
+        // Observability
+        // =====================================================================
+
+        getOpenDocuments: () =>
+          Effect.gen(function* () {
+            const current = yield* Ref.get(store);
+            const documents: DocumentInfo[] = [];
+            for (const [documentId, entry] of current) {
+              documents.push(yield* buildDocumentInfo(documentId, entry));
+            }
+            return documents;
+          }),
+
+        getDocumentInfo: (documentId) =>
+          Effect.gen(function* () {
+            const current = yield* Ref.get(store);
+            const existing = HashMap.get(current, documentId);
+            if (existing._tag === "None") {
+              return undefined;
+            }
+            return yield* buildDocumentInfo(documentId, existing.value);
+          }),
+
+        getHotStorageStats: (documentId) =>
+          Effect.gen(function* () {
+            const entries = yield* hotStorage.getEntries(documentId, 0);
+            return {
+              documentId,
+              walEntryCount: entries.length,
+              oldestEntryTimestamp:
+                entries.length > 0 ? entries[0]!.timestamp : undefined,
+              newestEntryTimestamp:
+                entries.length > 0
+                  ? entries[entries.length - 1]!.timestamp
+                  : undefined,
+            } satisfies DocumentHotStorageStats;
+          }),
+
+        getOverview: () =>
+          Effect.gen(function* () {
+            const current = yield* Ref.get(store);
+            const documents: DocumentInfo[] = [];
+            for (const [documentId, entry] of current) {
+              documents.push(yield* buildDocumentInfo(documentId, entry));
+            }
+            return {
+              activeDocumentCount: documents.length,
+              documents,
+            } satisfies EngineOverview;
+          }),
 
         config: resolvedConfig as ResolvedConfig<Primitive.AnyPrimitive>,
       };

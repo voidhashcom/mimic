@@ -23,6 +23,9 @@ import { Entity, Sharding } from "effect/unstable/cluster";
 import { Rpc } from "effect/unstable/rpc";
 import { type Primitive, type Transaction } from "@voidhash/mimic";
 import type {
+  DocumentInfo,
+  DocumentHotStorageStats,
+  EngineOverview,
   MimicClusterServerEngineConfig,
   PresenceEntry,
   PresenceEvent,
@@ -120,6 +123,18 @@ const PresenceEventSchema = Schema.Union([
  */
 const ServerMessageSchema = Schema.Any;
 
+/**
+ * Schema for document info response (observability)
+ */
+const DocumentInfoSchema = Schema.Struct({
+  documentId: Schema.String,
+  version: Schema.Number,
+  lastActivityTime: Schema.Number,
+  lastSnapshotVersion: Schema.Number,
+  lastSnapshotTime: Schema.Number,
+  transactionsSinceSnapshot: Schema.Number,
+});
+
 // =============================================================================
 // Mimic Document Entity Definition
 // =============================================================================
@@ -168,6 +183,11 @@ const MimicDocumentEntity = Entity.make("MimicDocument", [
   // Get presence snapshot
   Rpc.make("GetPresenceSnapshot", {
     success: PresenceSnapshotResponseSchema,
+  }),
+
+  // Get document info (observability)
+  Rpc.make("GetInfo", {
+    success: DocumentInfoSchema,
   }),
 ]);
 
@@ -411,6 +431,17 @@ const createEntityHandler = <TSchema extends Primitive.AnyPrimitive>(
           return { presences };
         }
       ),
+
+      GetInfo: Effect.fn("cluster.document.info.get")(function* () {
+        const tracking = yield* instance.getSnapshotTracking;
+        const lastActivityTime = yield* instance.getLastActivityTime();
+        return {
+          documentId,
+          version: instance.getVersion(),
+          lastActivityTime,
+          ...tracking,
+        };
+      }),
     };
   })();
 
@@ -429,6 +460,8 @@ interface SubscriptionStore {
   readonly getOrCreatePresencePubSub: (
     documentId: string
   ) => Effect.Effect<PubSub.PubSub<PresenceEvent>>;
+  /** Get all document IDs that have been accessed through this gateway node */
+  readonly getKnownDocumentIds: () => Effect.Effect<string[]>;
 }
 
 class SubscriptionStoreTag extends ServiceMap.Service<SubscriptionStoreTag, SubscriptionStore>()(
@@ -476,6 +509,17 @@ const subscriptionStoreLayer = Layer.effect(
           HashMap.set(map, documentId, pubsub)
         );
         return pubsub;
+      }),
+
+      getKnownDocumentIds: Effect.fn(
+        "cluster.subscriptions.known-document-ids"
+      )(function* () {
+        const current = yield* Ref.get(documentPubSubs);
+        const ids: string[] = [];
+        for (const [id] of current) {
+          ids.push(id);
+        }
+        return ids;
       }),
     };
   })()
@@ -562,6 +606,9 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
 
       // Get subscription store
       const subscriptionStore = yield* SubscriptionStoreTag;
+
+      // Capture hot storage for observability queries
+      const hotStorage = yield* HotStorageTag;
 
       const engine: MimicServerEngine = {
         submit: (documentId, transaction) =>
@@ -659,6 +706,68 @@ export const make = <TSchema extends Primitive.AnyPrimitive>(
             const pubsub =
               yield* subscriptionStore.getOrCreatePresencePubSub(documentId);
             return Stream.fromPubSub(pubsub);
+          }),
+
+        // =====================================================================
+        // Observability
+        // =====================================================================
+
+        getOpenDocuments: () =>
+          Effect.gen(function* () {
+            const documentIds = yield* subscriptionStore.getKnownDocumentIds();
+            const documents: DocumentInfo[] = [];
+            for (const documentId of documentIds) {
+              const client = makeClient(documentId);
+              const info = yield* client.GetInfo(undefined as void).pipe(
+                Effect.catchAll(() => Effect.succeed(undefined))
+              );
+              if (info) {
+                documents.push(info);
+              }
+            }
+            return documents;
+          }),
+
+        getDocumentInfo: (documentId) =>
+          Effect.gen(function* () {
+            const client = makeClient(documentId);
+            return yield* client.GetInfo(undefined as void).pipe(
+              Effect.catchAll(() => Effect.succeed(undefined))
+            );
+          }),
+
+        getHotStorageStats: (documentId) =>
+          Effect.gen(function* () {
+            const entries = yield* hotStorage.getEntries(documentId, 0);
+            return {
+              documentId,
+              walEntryCount: entries.length,
+              oldestEntryTimestamp:
+                entries.length > 0 ? entries[0]!.timestamp : undefined,
+              newestEntryTimestamp:
+                entries.length > 0
+                  ? entries[entries.length - 1]!.timestamp
+                  : undefined,
+            } satisfies DocumentHotStorageStats;
+          }),
+
+        getOverview: () =>
+          Effect.gen(function* () {
+            const documentIds = yield* subscriptionStore.getKnownDocumentIds();
+            const documents: DocumentInfo[] = [];
+            for (const documentId of documentIds) {
+              const client = makeClient(documentId);
+              const info = yield* client.GetInfo(undefined as void).pipe(
+                Effect.catchAll(() => Effect.succeed(undefined))
+              );
+              if (info) {
+                documents.push(info);
+              }
+            }
+            return {
+              activeDocumentCount: documents.length,
+              documents,
+            } satisfies EngineOverview;
           }),
 
         config: resolvedConfig as ResolvedClusterConfig<Primitive.AnyPrimitive>,

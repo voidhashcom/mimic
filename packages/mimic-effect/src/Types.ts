@@ -236,3 +236,52 @@ export interface ResolvedClusterConfig<TSchema extends Primitive.AnyPrimitive>
   /** Shard group name for cluster distribution */
   readonly shardGroup: string;
 }
+
+// =============================================================================
+// Observability Types
+// =============================================================================
+
+/**
+ * Runtime information about an active document.
+ * Returned by observability methods for dashboard/monitoring use.
+ */
+export interface DocumentInfo {
+  /** Document ID */
+  readonly documentId: string;
+  /** Current document version (number of applied transactions) */
+  readonly version: number;
+  /** Unix timestamp (ms) of last activity (transaction, touch, etc.) */
+  readonly lastActivityTime: number;
+  /** Version at which the last snapshot was saved */
+  readonly lastSnapshotVersion: number;
+  /** Unix timestamp (ms) of the last snapshot save */
+  readonly lastSnapshotTime: number;
+  /** Number of transactions applied since the last snapshot */
+  readonly transactionsSinceSnapshot: number;
+}
+
+/**
+ * Hot storage (WAL) statistics for a document.
+ * Shows the current state of the write-ahead log.
+ */
+export interface DocumentHotStorageStats {
+  /** Document ID */
+  readonly documentId: string;
+  /** Number of WAL entries currently stored */
+  readonly walEntryCount: number;
+  /** Unix timestamp (ms) of the oldest WAL entry, or undefined if empty */
+  readonly oldestEntryTimestamp: number | undefined;
+  /** Unix timestamp (ms) of the newest WAL entry, or undefined if empty */
+  readonly newestEntryTimestamp: number | undefined;
+}
+
+/**
+ * High-level overview of the engine's current state.
+ * Includes both aggregate metrics and per-document information.
+ */
+export interface EngineOverview {
+  /** Number of documents currently loaded in memory */
+  readonly activeDocumentCount: number;
+  /** Per-document information for all active documents */
+  readonly documents: readonly DocumentInfo[];
+}
